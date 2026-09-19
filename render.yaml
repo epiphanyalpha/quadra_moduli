@@ -1,0 +1,57 @@
+# Come questa app sta su Render.
+#
+# IL NOME E' L'INDIRIZZO. `quadra-moduli-prova` diventa
+# quadra-moduli-prova.onrender.com, che e' pubblico anche quando l'app e'
+# chiusa a chiave: chi legge l'indirizzo sa gia' qualcosa. Per questo non
+# porta il nome del cliente - quello si legge dentro, dopo il codice di
+# accesso, e li' lo vede solo chi e' entrato.
+#
+# IL PIANO. `starter` e non `free`, e sono due ragioni misurate, non gusto:
+# l'istanza gratuita si addormenta dopo un quarto d'ora e ci mette quasi un
+# minuto a svegliarsi - chi la usa pensa che sia rotta - e ha 512 MB, che
+# con LibreOffice che converte un .doc sono pochi. Se la prova durasse un
+# giorno si potrebbe rischiare; per un mese di lavoro vero no.
+#
+# IL DISCO. Senza, ogni riavvio riporta l'istanza com'era: l'anagrafica
+# caricata il primo giorno sparirebbe, e con lei tutto quello che si
+# aggiunge lavorando. E' la cosa che farebbe buttare via la prova.
+services:
+  - type: web
+    name: quadra-moduli-prova
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: frankfurt          # i dati sono di un'impresa italiana
+    healthCheckPath: /_stcore/health
+    envVars:
+      # Il modello. Una chiave sola, generata apposta per questo servizio:
+      # cosi' si puo' revocare senza toccare il lavoro locale, e si vede
+      # quanto consuma questa prova separata dal resto.
+      - key: QUADRA_BASE_URL
+        value: https://api.deepseek.com/v1
+      - key: QUADRA_MODELLO
+        value: deepseek-flash
+      - key: QUADRA_CHIAVE
+        sync: false            # si scrive nel pannello, mai nel repository
+      # Chi puo' entrare: "codice:Nome, codice:Nome". Senza questa, l'app
+      # su un server si rifiuta di aprirsi - e' la protezione contro la
+      # dimenticanza, non contro l'attacco.
+      - key: CLIENTI
+        sync: false
+      # Il giorno in cui la prova finisce, in formato 2026-10-31. Si mette
+      # adesso: una prova senza scadenza diventa un servizio acceso per
+      # sempre che nessuno guarda piu'.
+      - key: APP_SCADENZA
+        sync: false
+      # Dove scrivere: il disco qui sotto. Senza questa variabile l'app
+      # scriverebbe accanto al programma, dentro l'immagine, e a ogni
+      # rilascio si riparte da zero.
+      - key: QUADRA_DATI
+        value: /app/dati
+    disk:
+      name: dati
+      # Qui dentro sta l'anagrafica dell'impresa e il lavoro fatto. Le due
+      # cartelle stanno sotto un unico punto di montaggio perche' Render ne
+      # consente uno solo per servizio.
+      mountPath: /app/dati
+      sizeGB: 1

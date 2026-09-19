@@ -1,0 +1,18 @@
+# Quello che non deve entrare nell'immagine.
+
+# I dati veri: il fascicolo dell'impresa si carica da fuori, non si cuoce
+# dentro un'immagine che poi gira chissa' dove.
+fascicoli/
+clienti.json
+.env
+
+# Roba di lavoro: pesa e non serve al server.
+esiti/
+corpus/
+corpus_word/
+storico/
+prove/
+.git/
+__pycache__/
+**/__pycache__/
+*.pyc
