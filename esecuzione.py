@@ -89,6 +89,28 @@ def _ambiente_pulito() -> dict[str, str]:
 LIBRERIA = Path(__file__).resolve().parent / "riusare" / "strumenti_documento.py"
 
 
+def esegui_al_meglio(codice: str, originale, cartella, fascicolo: dict) -> dict:
+    """Nel contenitore dove c'e', sotto sorveglianza dove non si puo' avere.
+
+    Il contenitore resta la prima scelta e non e' una formalita': tiene
+    anche contro quello che non abbiamo previsto, mentre la sorveglianza
+    tiene contro quello che abbiamo previsto. Ma dentro un contenitore un
+    altro contenitore non ci sta, e su un server l'alternativa non era "un
+    po' meno protetto": era **non compilare i PDF affatto**, cioe' quasi
+    tutti i bandi.
+
+    Le due strade producono la stessa bozza. Verificato sugli artefatti
+    esistenti: stesse ancore, stessi valori, nessuna differenza.
+    """
+    if disponibile():
+        return dict(esegui(codice, originale, cartella, fascicolo),
+                    strada="contenitore")
+    import esecuzione_sorvegliata
+    return dict(esecuzione_sorvegliata.esegui(codice, originale, cartella,
+                                              fascicolo),
+                strada="sorvegliata")
+
+
 def esegui(codice: str, originale: Path, cartella: Path, fascicolo: dict) -> dict:
     """Espone al programma solo l'originale in lettura e una cartella in scrittura.
 

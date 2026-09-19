@@ -200,7 +200,7 @@ def lavora(radice: Path, pdf, fascicolo: dict, cartella_lavoro: Path,
 def _esegui_e_controlla(pdf, fascicolo, cartella_lavoro, codice, mappa, note,
                         artefatto):
     yield {"passo": "esecuzione", "testo": "Eseguo il programma, isolato."}
-    esito = esecuzione.esegui(codice, pdf, cartella_lavoro, fascicolo)
+    esito = esecuzione.esegui_al_meglio(codice, pdf, cartella_lavoro, fascicolo)
     if not esito["riuscita"]:
         yield {"passo": "errore", "verdetto": None, "esecuzione": esito,
                "testo": "Il programma non ha prodotto la bozza.\n%s"

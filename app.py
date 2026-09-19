@@ -419,15 +419,8 @@ with st.sidebar:
     # cose inutili per chi compila: non puo' deciderne nessuna delle due, e
     # leggerle la mette davanti all'impianto invece che al suo lavoro. Dei
     # guai invece va detto tutto, perche' cambiano quello che puo' fare.
-    if esecuzione.disponibile() and agente.disponibile():
+    if agente.disponibile():
         st.success("Pronta: posso compilare Word e PDF.")
-    elif agente.disponibile():
-        st.warning("Posso compilare i Word. **Non i PDF**: per quelli serve "
-                   "Docker, che su questo computer non risponde. Un PDF gia' "
-                   "compilato una volta si rifa' lo stesso, dopo aver "
-                   "costruito il contenitore:")
-        st.code("docker build -f Dockerfile.agente -t %s ." % esecuzione.IMMAGINE,
-                language="bash")
     else:
         st.error("Manca la chiave del servizio che legge i moduli: posso solo "
                  "rifare i PDF gia' compilati una volta. Chiedi a chi "
@@ -679,7 +672,7 @@ with pagina_moduli:
                 mappa_art = json.loads((cartella / "mappa.json").read_text(encoding="utf-8"))
                 note_art = json.loads((cartella / "note.json").read_text(encoding="utf-8"))
                 originale = Path(st.session_state.modulo)
-                esito = esecuzione.esegui(compilatore.senza(codice, da_togliere),
+                esito = esecuzione.esegui_al_meglio(compilatore.senza(codice, da_togliere),
                                           originale, LAVORO, fascicolo)
                 if not esito["riuscita"]:
                     st.error("Non sono riuscito a rifarla: %s"
