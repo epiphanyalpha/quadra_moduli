@@ -236,23 +236,9 @@ def _senza_ripetizione(etichetta: str, valore: str) -> str:
     UNA parola, l'ULTIMA dell'etichetta, lunga almeno tre lettere, e solo se
     il valore non si riduce a quella.
 
-    ALLARGARLA E' TENTANTE E FA DANNO. Resta fuori questa, che si legge male:
+    Poi c'e' l'eco di una FRASE, che `_senza_eco` prende a parte:
 
         Camera di Commercio ... di [Camera di Commercio Riviere di Liguria]
-
-    e per prenderla bisognerebbe cercare la frase in tutta l'etichetta invece
-    che in fondo. Misurato su tutte le 654 scritture: quella regola scatta 35
-    volte, ne sistema due, e in cambio produce
-
-        [rivamare]@pec.example.invalid -> "@pec.example.invalid"
-
-    perche' "rivamare" compare gia' prima nella riga; svuota "Legale
-    rappresentante" dove l'etichetta lo dice per esteso; e riduce "Societa' a
-    responsabilita' limitata" a "a responsabilita' limitata". Due sistemate,
-    una castroneria nuova e due peggioramenti: il conto non torna.
-
-    Quel caso e' piuttosto un dato del fascicolo scritto per esteso dove il
-    modulo chiede solo il nome: si risolve nell'anagrafica, non qui.
     """
     parole_etichetta = PAROLA.findall(etichetta or "")
     parole_valore = PAROLA.findall(valore or "")
@@ -262,6 +248,69 @@ def _senza_ripetizione(etichetta: str, valore: str) -> str:
     if len(ripetuta) < MINIMA_PAROLA or ripetuta.lower() != parole_valore[0].lower():
         return valore
     return re.sub(r"^\s*%s\b[\s,]*" % re.escape(parole_valore[0]), "", valore, count=1)
+
+
+MINIMA_FRASE = 2      # parole che devono ripetersi perche' sia un'eco
+MINIMO_RESTO = 2      # parole che devono restare, perche' resti un dato
+FRASE_MASSIMA = 6
+FRA_PARENTESI = re.compile(r"\([^)]*\)")
+
+
+def _senza_eco(prima: str, valore: str) -> str:
+    """Toglie dal valore la FRASE che la riga ha gia' stampato prima.
+
+    Non la parola attaccata - quella la toglie `_senza_ripetizione` - ma il
+    titolo che il modulo mette da solo:
+
+        ...registro delle imprese della Camera di Commercio Industria
+        Artigianato ed Agricoltura di [Camera di Commercio Riviere di
+        Liguria - Imperia La Spezia Savona]
+
+    LE DUE SOGLIE NON SONO A OCCHIO, e la prima versione di questa regola
+    l'avevo scartata perche' faceva danni. Misurate su tutte le scritture
+    del collaudo, contando quante volte scatta:
+
+        frase >= 1 parola,  resta >= 1     25 volte, e fa disastri
+        frase >= 2 parole,  resta >= 1     10 volte
+        frase >= 2 parole,  resta >= 2      9 volte, tutte giuste
+
+    Con una parola sola toglieva "rivamare" da "rivamare@pec.example.invalid"
+    - perche' l'indirizzo compariva gia' prima nella riga - e riduceva
+    "Societa' a responsabilita' limitata" a "a responsabilita' limitata".
+    Chiedendo che ne restino almeno due, non svuota piu' "Legale
+    rappresentante" dove l'etichetta lo dice per esteso.
+
+    Con le due soglie a due, sul corpus scatta nove volte e tutte e nove
+    sono la Camera di Commercio. Nessun altro caso viene toccato.
+
+    Quello fra parentesi non conta: li' il modulo elenca le scelte
+    possibili - "(titolare, legale rappresentante, procuratore)" - e
+    sceglierne una non e' ripetere.
+    """
+    # Le parole si contano sugli spazi, non sulle lettere. Spezzandole sulla
+    # punteggiatura, "rivamare@pec.example.invalid" diventa quattro parole -
+    # rivamare, pec, example, invalid - e se l'indirizzo compare gia' nella
+    # riga la regola ne mangia due e lascia ".example.invalid". Un indirizzo
+    # e' una parola sola, e cosi' non entra nemmeno nel conto.
+    pezzi = (valore or "").split()
+    if len(pezzi) < MINIMA_FRASE + MINIMO_RESTO:
+        return valore
+    def nudo(p):
+        return re.sub(r"[^\wÀ-ſ]", "", p).lower()
+    prima_pezzi = [nudo(p) for p in FRA_PARENTESI.sub(" ", prima or "").split()]
+    valore_pezzi = [nudo(p) for p in pezzi]
+    if not prima_pezzi:
+        return valore
+    for quante in range(min(len(pezzi), FRASE_MASSIMA), MINIMA_FRASE - 1, -1):
+        if len(pezzi) - quante < MINIMO_RESTO:
+            continue
+        frase = valore_pezzi[:quante]
+        if not all(frase) or not any(
+                prima_pezzi[i:i + quante] == frase
+                for i in range(len(prima_pezzi) - quante + 1)):
+            continue
+        return " ".join(pezzi[quante:]).lstrip(" ,;-–")
+    return valore
 
 
 # La capienza di un campo modulo, quando il modulo non la dichiara. Non c'e'
@@ -529,6 +578,14 @@ def scrivi(percorso, mappa: dict, valori: dict, uscita) -> dict:
             # legge. In una cella di tabella l'intestazione sta altrove e
             # togliere la parola lascerebbe la cella monca.
             testo = _senza_ripetizione(a.get("etichetta", ""), testo)
+            # Per l'eco di una frase serve tutta la riga prima del buco, non
+            # l'etichetta: "Camera di Commercio" sta sessanta caratteri piu'
+            # in la' di dove l'etichetta comincia, e con l'etichetta sola si
+            # perderebbe per un pelo. Le scritture dello stesso paragrafo
+            # vanno da destra a sinistra, quindi quello che sta a sinistra
+            # del buco non e' ancora stato toccato.
+            prefisso = _testo(paragrafi[a["paragrafo"]])[:a["inizio"]]
+            testo = _senza_eco(prefisso, testo)
         if a["tipo"] == "cella":
             cella = documento.tables[a["tabella"]].rows[a["riga"]].cells[a["colonna"]]
             if cella.text.strip():
