@@ -57,10 +57,14 @@ def codici() -> dict:
         except (ValueError, OSError):
             pass
     for pezzo in os.getenv("CLIENTI", "").split(","):
-        if ":" in pezzo:
-            codice, nome = pezzo.split(":", 1)
-            if codice.strip():
-                fuori[codice.strip()] = nome.strip() or "Ospite"
+        # Il nome dopo i due punti e' comodo ma non obbligatorio. Scritto
+        # obbligatorio era una trappola: chi imposta la variabile scrive la
+        # parola d'accesso e basta, l'app non trova nessun codice valido e
+        # si chiude dicendo "accesso non configurato" - cioe' sembra rotta
+        # proprio a chi l'ha appena configurata.
+        codice, _, nome = pezzo.partition(":")
+        if codice.strip():
+            fuori[codice.strip()] = nome.strip() or "Ospite"
     return fuori
 
 
