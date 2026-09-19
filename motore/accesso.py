@@ -32,15 +32,27 @@ import streamlit as st
 CLIENTI_SU_FILE = Path(__file__).resolve().parent.parent / "clienti.json"
 
 
-def in_produzione() -> bool:
-    """Vero se giriamo su un server, falso sul computer di chi sviluppa.
+def aperta_senza_codice() -> bool:
+    """Se e' lecito lavorare senza lucchetto: solo dove lo si dichiara.
 
-    Render espone queste variabili da solo. Non si guarda un interruttore
-    nostro, che qualcuno puo' dimenticare girato dalla parte sbagliata: si
-    guarda una cosa che c'e' solo la' fuori.
+    PRIMA QUI SI INDOVINAVA, E HA SBAGLIATO. La regola era "se vedo le
+    variabili che mette Render, allora sono in produzione e senza codici mi
+    chiudo". Su Render con Docker quelle variabili non sono arrivate, l'app
+    si e' creduta sul computer di casa e **si e' aperta a chiunque**. Non
+    era teoria: e' successo, sul servizio vero, con il nome del cliente in
+    cima alla pagina.
+
+    Il difetto non era la lista di variabili sbagliata - era il verso. Una
+    regola che deve indovinare dove si trova, quando indovina male sbaglia
+    dalla parte di lasciare entrare tutti.
+
+    Adesso non indovina: **chiuso, a meno che qualcuno non dica il
+    contrario.** ACCESSO_LIBERO=1 si mette nel .env locale, che non entra
+    nel repository e non arriva su nessun server. Se un giorno lo si
+    dimentica, l'errore e' restare chiusi fuori dal proprio computer: fa
+    perdere un minuto, si vede subito, non fa danno a nessuno.
     """
-    return bool(os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID")
-                or os.getenv("RENDER_EXTERNAL_URL"))
+    return os.getenv("ACCESSO_LIBERO", "").strip() in ("1", "si", "true", "vero")
 
 
 def codici() -> dict:
@@ -94,12 +106,13 @@ def porta(marchio: str = "") -> str:
 
     ammessi = codici()
     if not ammessi:
-        if in_produzione():
-            st.error("**Accesso non configurato.** Manca la variabile "
-                     "`CLIENTI` (formato `codice:Nome`). L'app resta chiusa "
-                     "finche' non viene impostata.")
-            st.stop()
-        return ""                      # in locale si lavora senza lucchetto
+        if aperta_senza_codice():
+            return ""                  # dichiarato aperto: solo in locale
+        st.error("**Accesso non configurato: l'app resta chiusa.**\n\n"
+                 "Manca la variabile `CLIENTI` con la parola d'accesso. "
+                 "Si mette nel pannello del servizio, sezione Environment, "
+                 "e poi il servizio va riavviato perche' la legga.")
+        st.stop()
 
     if st.session_state.get("chi_entra"):
         return st.session_state["chi_entra"]
