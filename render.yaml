@@ -6,21 +6,39 @@
 # porta il nome del cliente - quello si legge dentro, dopo il codice di
 # accesso, e li' lo vede solo chi e' entrato.
 #
-# IL PIANO. `starter` e non `free`, e sono due ragioni misurate, non gusto:
-# l'istanza gratuita si addormenta dopo un quarto d'ora e ci mette quasi un
-# minuto a svegliarsi - chi la usa pensa che sia rotta - e ha 512 MB, che
-# con LibreOffice che converte un .doc sono pochi. Se la prova durasse un
-# giorno si potrebbe rischiare; per un mese di lavoro vero no.
+# IL PIANO. `free`, deciso da chi paga: in prova non si spende. Va detto
+# che cosa si accetta, perche' non sono difetti nascosti ma due conseguenze
+# precise.
 #
-# IL DISCO. Senza, ogni riavvio riporta l'istanza com'era: l'anagrafica
-# caricata il primo giorno sparirebbe, e con lei tutto quello che si
-# aggiunge lavorando. E' la cosa che farebbe buttare via la prova.
+# La memoria NON e' fra queste: il piano gratuito da' 512 MB, esattamente
+# come starter, e la misura dentro un contenitore limitato a 512 MB dice
+# 339 MB di picco facendo tutto - leggere il modulo piu' grosso, scrivere,
+# rendere il PDF, disegnare l'anteprima. Ci sta.
+#
+# Le due conseguenze sono:
+#
+#   SI ADDORMENTA dopo un quarto d'ora e ci mette quasi un minuto a
+#   svegliarsi. Chi apre il link fra una telefonata e l'altra vede una
+#   pagina che non risponde.
+#
+#   NIENTE DISCO: sul piano gratuito Render non lo permette. Ogni riavvio
+#   riporta l'istanza com'era, quindi l'anagrafica caricata sparisce e va
+#   ricaricata. Per questo l'app lo dice in chiaro e permette di
+#   riscaricare il fascicolo: cosi' rimetterlo e' questione di secondi.
+#
+# Per togliere tutte e due: `plan: starter` e il blocco `disk` qui sotto,
+# commentato. Sono circa $7,25 al mese.
+#
+#    disk:
+#      name: dati
+#      mountPath: /app/dati
+#      sizeGB: 1
 services:
   - type: web
     name: quadra-moduli-prova
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: starter
+    plan: free
     region: frankfurt          # i dati sono di un'impresa italiana
     healthCheckPath: /_stcore/health
     envVars:
@@ -43,15 +61,12 @@ services:
       # sempre che nessuno guarda piu'.
       - key: APP_SCADENZA
         sync: false
-      # Dove scrivere: il disco qui sotto. Senza questa variabile l'app
-      # scriverebbe accanto al programma, dentro l'immagine, e a ogni
-      # rilascio si riparte da zero.
+      # Dove scrivere. Adesso e' una cartella dentro il contenitore, che
+      # sparisce a ogni riavvio; il giorno che si aggiunge il disco basta
+      # montarlo qui e non cambia nient'altro.
       - key: QUADRA_DATI
         value: /app/dati
-    disk:
-      name: dati
-      # Qui dentro sta l'anagrafica dell'impresa e il lavoro fatto. Le due
-      # cartelle stanno sotto un unico punto di montaggio perche' Render ne
-      # consente uno solo per servizio.
-      mountPath: /app/dati
-      sizeGB: 1
+      # Senza disco quello che si scrive non sopravvive al
+      # riavvio. L'app lo dice invece di lasciarlo scoprire.
+      - key: DATI_VOLATILI
+        value: "1"

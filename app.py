@@ -392,6 +392,23 @@ with st.sidebar:
     if fascicoli.e_di_prova(fascicolo):
         st.error("**Dati finti.** Questo fascicolo serve alle prove: le "
                  "bozze che escono non si consegnano a nessuno.")
+
+    # Sul piano gratuito non c'e' un disco: quello che si scrive vive finche'
+    # il server resta acceso. Dirlo e' meno della meta' del lavoro - l'altra
+    # meta' e' rendere indolore rimetterlo, e per questo c'e' il bottone.
+    # Scoprirlo da soli, con l'anagrafica sparita e un modulo da consegnare,
+    # sarebbe il modo peggiore.
+    if os.environ.get("DATI_VOLATILI"):
+        with st.expander("L'anagrafica va tenuta al sicuro"):
+            st.caption("Questo server non ha una memoria permanente: se si "
+                       "riavvia, l'anagrafica va ricaricata. Tienine una "
+                       "copia sul tuo computer e rimetterla sarà questione "
+                       "di secondi.")
+            st.download_button(
+                "Scarica l'anagrafica",
+                json.dumps(fascicolo, ensure_ascii=False, indent=1)
+                    .encode("utf-8"),
+                file_name=Path(scelto).name, mime="application/json")
     vuoti = scheda.mancanti(profilo)
     st.caption("%d dati in anagrafica%s"
                % (len(profilo), ", %d da riempire" % len(vuoti) if vuoti else ""))
