@@ -784,6 +784,11 @@ with pagina_word:
                     st.session_state.w_rifiuto = passo["testo"]
         except agente.ModelloAssente as fermata:
             st.error(str(fermata))
+        except Exception as fermata:
+            st.session_state.w_verdetto = None
+            st.session_state.w_bozza = None
+            st.error("Compilazione Word interrotta (%s). Nessuna bozza verificata disponibile: riprova."
+                     % type(fermata).__name__)
 
     if caricato_w is not None and st.button("Compila il Word", type="primary"):
         LAVORO_WORD.mkdir(parents=True, exist_ok=True)
@@ -826,7 +831,13 @@ with pagina_word:
                 st.caption("%s — %d campi — «%s»"
                            % (a["motivo"], len(a["ancore"]), a["riga"]))
 
-        st.success(lavorazione_word.racconta(vw).split("\n")[0])
+        messaggio_w = lavorazione_word.racconta(vw)
+        if vw.get("esito") == "non_compilato":
+            st.error(messaggio_w)
+        elif vw.get("esito") == "da_verificare":
+            st.warning(messaggio_w)
+        else:
+            st.success(messaggio_w)
 
         if st.session_state.w_bozza:
             st.download_button("Scarica la bozza Word",
@@ -887,7 +898,7 @@ with pagina_word:
                 st.rerun()
 
         if vw["mancate"]:
-            with st.expander("%d valori non scritti perché troppo lunghi"
+            with st.expander("%d valori non scritti: motivi"
                              % len(vw["mancate"])):
                 for m in vw["mancate"]:
                     st.caption("%s — %s" % (m["valore"][:60], m["motivo"]))

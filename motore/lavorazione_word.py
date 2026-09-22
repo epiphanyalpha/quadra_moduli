@@ -78,11 +78,13 @@ def lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
                                      ": " + dettaglio if dettaglio else "")}
 
     testo, indirizzi = word.rendi(mappa)
+    testo = ("DOCUMENTO WORD: i segnaposto :testo indicano campi testuali, non "
+             "limiti di lunghezza. Gli spazi candidati possono essere impaginazione: "
+             "compila soltanto quelli che nel contesto chiedono un dato.\n" + testo)
     if not indirizzi:
         yield {"passo": "verdetto", "verdetto": None,
-               "testo": "Non ho trovato nessun campo da riempire in questo "
-                        "documento. Se e' un modulo, usa le righe di trattini "
-                        "o le celle di tabella."}
+                "testo": "Non ho riconosciuto campi scrivibili in questo documento. "
+                         "La lettura potrebbe essere incompleta: il modulo non e' compilato."}
         return
 
     if pertinenza_confermata:
@@ -118,6 +120,8 @@ def lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
     anagrafe = Anagrafe(fascicolo)
     profilo = fascicolo.get("profilo", {})
     senza_dato = []
+    guasti = []
+    bocciati = {}
 
     if scelte_di_prima is not None:
         yield {"passo": "riuso",
@@ -236,6 +240,17 @@ def lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
     verdetto["avvisi"] = soggetti.avvertimenti(finta, scritte)
     verdetto["contraddizioni"] = soggetti.contraddizioni(finta, scritte)
     verdetto["campi_totali"] = len(mappa["ancore"])
+    verdetto["candidati"] = sum(a.get("candidato", False) for a in mappa["ancore"])
+    verdetto["assegnati"] = len(valori)
+    verdetto["non_scrivibili"] = [a for a in mappa["ancore"] if not a.get("scrivibile", True)]
+    verdetto["avvisi_tecnici"] = mappa.get("avvisi_tecnici", [])
+    verdetto["guasti"] = guasti
+    verdetto["bocciati"] = bocciati
+    verdetto["irrisolti"] = len(mappa["ancore"]) - len(verdetto["verificate"])
+    verdetto["esito"] = ("non_compilato" if not verdetto["verificate"] else
+                         "da_verificare" if (verdetto["irrisolti"] or guasti or
+                                              verdetto["avvisi_tecnici"] or
+                                              verdetto["non_trovate"]) else "compilato")
     verdetto["senza_dato"] = sorted(set(senza_dato))
     verdetto["spenti"] = len(spente)
     verdetto["valori"] = valori
@@ -250,14 +265,18 @@ def lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
 
 
 def racconta(verdetto: dict) -> str:
-    righe = ["%d campi scritti e verificati su %d campi del modulo."
+    righe = ["%d campi scritti e verificati su %d campi individuati nel documento."
              % (len(verdetto["verificate"]), verdetto["campi_totali"])]
     if verdetto["non_trovate"]:
         righe.append("%d scritture non risultano nel documento: da guardare."
                      % len(verdetto["non_trovate"]))
     if verdetto["mancate"]:
-        righe.append("%d valori non scritti perche' troppo lunghi per il posto "
-                     "che avevano." % len(verdetto["mancate"]))
+        righe.append("%d valori non scritti: controllare i motivi indicati."
+                     % len(verdetto["mancate"]))
+    if verdetto.get("guasti"):
+        righe.append("La rilettura non e' riuscita: le assegnazioni non verificate sono sospese.")
+    if verdetto.get("non_scrivibili") or verdetto.get("avvisi_tecnici"):
+        righe.append("Il documento contiene strutture da verificare manualmente; la lettura non e' certificata completa.")
     if verdetto["contraddizioni"]:
         righe.append("%d dichiarazioni alternative risultano compilate piu' di "
                      "una volta: vanno sistemate, dicono cose incompatibili."

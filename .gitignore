@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+esiti/
+fascicoli/
+clienti.json
+consumi.json
+.pytest_cache/
+.codex_tmp/
+mockup_c/
+.claude/
