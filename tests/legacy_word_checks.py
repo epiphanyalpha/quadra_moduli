@@ -620,5 +620,3 @@ if __name__ == "__main__":
             print("  FALLITA %s\n            %s" % (descrizione, guaio))
     print("\n%d prove, %d fallite" % (len(_prove), falliti))
     raise SystemExit(1 if falliti else 0)
-
-
