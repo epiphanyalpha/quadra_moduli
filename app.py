@@ -705,52 +705,8 @@ with pagina_word:
     caricato_w = st.file_uploader("Trascina qui il modulo Word",
                                   type=["docx", "doc"], key="carica_word")
 
-    # Misurato su 48 bandi e 4553 campi: questa domanda da sola decide 1152
-    # campi, il 25,3%. Se l'impresa si presenta da sola, un quarto del modulo
-    # si spegne prima di chiedere al modello - meno spesa e meno occasioni di
-    # sbagliare. E' la cosa che migliora di piu' il risultato, e costa un clic.
-    st.markdown("**Come partecipa l'impresa a questa gara?**")
-    # A scelta multipla e non singola: si puo' partecipare in raggruppamento
-    # E subappaltare, e con la scelta singola chi lo fa si vedeva spegnere
-    # sezioni che invece lo riguardano.
-    # Tre risposte esplicite e non una casella che ne apre altre: "da sola" e
-    # "non lo so" sono risposte OPPOSTE - la prima spegne un quarto del
-    # modulo, la seconda non spegne niente - e con la casella "lo so gia'"
-    # si assomigliavano, perche' spuntata-e-basta e non-spuntata si vedono
-    # quasi uguali.
-    DA_SOLA = "Partecipa da sola"
-    INSIEME = "Partecipa insieme ad altri, o subappalta"
-    NON_SO = "Non lo so ancora"
-    risposta = st.radio("scelta della partecipazione",
-                        [DA_SOLA, INSIEME, NON_SO], key="w_partecipazione",
-                        label_visibility="collapsed",
-                        help="È la risposta che conta di più: su 48 bandi "
-                             "decide 1152 campi su 4553, il 25%.")
-    if risposta == NON_SO:
-        condizioni_w = None
-        st.caption("Senza risposta decide il modello, sezione per sezione, ed "
-                   "è lì che sbaglia più spesso. Se lo sai, dimmelo.")
-    else:
-        scelte = set()
-        if risposta == INSIEME:
-            c1, c2, c3 = st.columns(3)
-            if c1.checkbox("In raggruppamento o consorzio", key="w_rti"):
-                scelte.add("raggruppamento")
-            if c2.checkbox("Con avvalimento", key="w_avv"):
-                scelte.add("avvalimento")
-            if c3.checkbox("Con subappalto", key="w_sub"):
-                scelte.add("subappalto")
-        condizioni_w = scelte
-        if risposta == INSIEME and not scelte:
-            st.caption("Spunta quali: finché non lo fai è come dire che "
-                       "partecipa da sola.")
-        elif not scelte:
-            st.caption("**Partecipa da sola.** Le sezioni su raggruppamenti, "
-                       "avvalimento e subappalto resteranno vuote: su un bando "
-                       "tipico è circa un quarto dei campi.")
-        else:
-            st.caption("Restano attive: %s. Le altre sezioni condizionali "
-                       "resteranno vuote." % ", ".join(sorted(scelte)))
+    # No participation questionnaire and no implicit exclusions from a default.
+    condizioni_w = None
 
     def _compila_word(documento: Path, confermata: bool = False, togli=(),
                       condizioni=None, scelte_di_prima=None):

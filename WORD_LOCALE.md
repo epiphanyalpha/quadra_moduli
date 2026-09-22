@@ -6,6 +6,12 @@ Base: repository ufficiale `epiphanyalpha/quadra_moduli`, commit
 
 ## Cosa cambia
 
+Aggiornamento successivo autorizzato: anche in A rimosso il questionario
+preliminare sulla partecipazione, comprese le checkbox dipendenti. La UI
+passa condizioni=None: nessuna esclusione da risposte preselezionate o
+vecchio stato sessione. Motore A e revisione/Togli invariati. Il checkpoint
+precedente 98f0144, tag word-a-20260922 e relativo bundle restano recuperabili.
+
 - L'API `word.leggi/rendi/scrivi/verifica` resta invariata per l'app.
 - Il lettore conserva l'ordine XML di paragrafi e tabelle, incluse tabelle
   annidate, intestazioni/piè di pagina e testo accessibile delle caselle di testo.
