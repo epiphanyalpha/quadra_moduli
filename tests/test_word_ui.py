@@ -9,6 +9,19 @@ from motore import agente, fascicoli
 
 
 class WordUiTests(unittest.TestCase):
+    def test_word_download_always_has_docx_extension(self):
+        import ast
+        from types import SimpleNamespace
+        source = (Path(__file__).resolve().parents[1]/'app.py').read_text(encoding='utf-8')
+        call = next(n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.Call)
+                    and n.args and isinstance(n.args[0], ast.Constant)
+                    and n.args[0].value == 'Scarica la bozza Word')
+        expression = next(k.value for k in call.keywords if k.arg == 'file_name')
+        code = compile(ast.Expression(expression), '<download filename>', 'eval')
+        for name in ('modulo.doc', 'modulo.docx', 'modulo.DOC'):
+            result = eval(code, {'Path':Path, 'st':SimpleNamespace(session_state={'w_modulo':name})})
+            self.assertEqual(result, 'bozza_modulo.docx')
+
     def test_existing_tabs_and_failed_compilation_message(self):
         with tempfile.TemporaryDirectory() as directory:
             profile={'prova':True,'profilo':{'ragione_sociale':'Impresa sintetica','pec':'test@example.invalid'}}

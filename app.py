@@ -799,7 +799,7 @@ with pagina_word:
             st.download_button("Scarica la bozza Word",
                                Path(st.session_state.w_bozza).read_bytes(),
                                file_name="bozza_" + Path(
-                                   st.session_state.get("w_modulo", "modulo.docx")).name,
+                                   st.session_state.get("w_modulo", "modulo.docx")).with_suffix(".docx").name,
                                mime="application/vnd.openxmlformats-"
                                     "officedocument.wordprocessingml.document")
 
