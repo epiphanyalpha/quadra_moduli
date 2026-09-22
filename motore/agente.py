@@ -394,7 +394,7 @@ Rispondi con un solo blocco json, solo i posti che sai riempire:
 
 
 def abbina_pagina(testo_pagina: str, indirizzi: dict, chiavi_anagrafica,
-                  immagine=None, scartate=None) -> dict:
+                  immagine=None, scartate=None, decisioni=None) -> dict:
     """Legge una pagina intera e dice quali posti sa riempire.
 
     Una pagina alla volta, come farebbe chiunque: le sezioni, le intestazioni e
@@ -413,10 +413,35 @@ def abbina_pagina(testo_pagina: str, indirizzi: dict, chiavi_anagrafica,
     """
     richiesta = "%s\n\n--- CAMPI DELL'ANAGRAFICA\n%s\n\n--- LA PAGINA\n%s" % (
         ISTRUZIONI_PAGINA, "\n".join(sorted(chiavi_anagrafica)), testo_pagina)
+    if decisioni is not None:
+        richiesta += """\nCONTRATTO WORD: restituisci UNA voce per OGNI posto,
+con campo e motivo. Per un posto da lasciare vuoto usa campo="" e spiega il
+motivo. Lo stesso dato va ripetuto in tutti i campi che lo richiedono per lo
+stesso soggetto: non omettere una ragione sociale o P.IVA perche compare gia.
+Non confondere ripetizione con cambio di soggetto. Denominazione e ragione
+sociale possono essere sinonimi nello stesso campo. Sottoscritto senza
+distinzione nome/cognome richiede il nome completo, non solo il cognome.
+Nello schema nome_rappresentante indica il nome completo; la chiave
+nome_rappresentante_solo indica il solo nome proprio. Una frase come
+'nat [posto] a [posto] il [posto]' contiene una desinenza grammaticale,
+poi luogo e data: non mettere il luogo nel posto della desinenza, e non
+inventare una richiesta di provincia dove non e indicata. Se manca una
+chiave adatta alla desinenza, lasciala vuota. 'Corrente in', riferito a
+un'impresa, chiede la sua sede: non e automaticamente un dato della gara.
+Gli spazi candidati possono essere impaginazione: non inserirvi una carica
+nel mezzo di una frase stampata. Se un campo richiede solo una parte di un
+dato aggregato non assegnare l'intero aggregato. Alternative gia soddisfatte
+dal dato stampato restano vuote. Queste istruzioni sostituiscono la richiesta
+precedente di elencare solo i posti riempiti. Nessun limite di capienza Word.
+"""
     risposta = _chiedi([_messaggio(richiesta, [immagine] if immagine else ())])
     deciso = {}
     for voce in _lista_risposta(risposta, "campo"):
         campo, posto = voce["campo"], str(voce["posto"])
+        if decisioni is not None and posto in indirizzi:
+            decisioni[indirizzi[posto]] = {"campo": campo, "motivo": str(voce.get("motivo") or "Motivo non restituito")[:500]}
+            if not campo:
+                continue
         if campo not in chiavi_anagrafica or posto not in indirizzi:
             if scartate is None:
                 raise RispostaModelloInvalida("Posto o chiave fuori dal contratto")

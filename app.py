@@ -840,6 +840,9 @@ with pagina_word:
                     st.markdown("**%s** — %s" % (r["valore"], r.get("riga", "")))
                     if ritagli_w.get(r["ancora"]):
                         st.image(ritagli_w[r["ancora"]])
+            for d in vw.get('decisioni_campi', {}).values():
+                if not d['scritto'] and d.get('etichetta'):
+                    st.caption('%s — non scritto: %s' % (d['etichetta'], d.get('motivo') or d.get('bocciatura') or 'Decisione non disponibile'))
             if st.button("Rifai la bozza senza i %d campi spuntati"
                          % len(togliere_w), disabled=not togliere_w,
                          key="rifai_word"):

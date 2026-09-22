@@ -66,6 +66,45 @@ class WordTests(unittest.TestCase):
         self.assertEqual(Document(out).paragraphs[0].text.count(value),2)
         self.assertEqual(len(check['verificate']),1)
 
+    def test_placeholder_padding_is_not_a_field(self):
+        src=self.source(lambda d:d.add_paragraph('P. IVA   ___________________________  corrente in __________________ '))
+        m=word.leggi(src)
+        self.assertEqual(len(m['ancore']),2)
+        self.assertEqual([a['etichetta'] for a in m['ancore']],['P. IVA','corrente in'])
+        self.assertTrue(all(a['tipo_word']=='testo' for a in m['ancore']))
+
+    def test_mixed_space_tab_padding_does_not_split_a_name(self):
+        src=self.source(lambda d:d.add_paragraph('Il sottoscritto ___   \tnato a ___ il ___'))
+        m=word.leggi(src)
+        self.assertEqual(len(m['ancore']),3)
+        self.assertEqual([a['etichetta'] for a in m['ancore']],['Il sottoscritto','nato a','il'])
+
+    def test_repeated_company_fields_remain_distinct_writable_fields(self):
+        def build(d):
+            d.add_paragraph('Denominazione e ragione sociale ___')
+            d.add_paragraph('P. IVA   ___')
+            d.add_paragraph('Ragione sociale ___ P.IVA: ___')
+        src=self.source(build)
+        m=word.leggi(src)
+        self.assertEqual(len(m['ancore']),4)
+        values=dict(zip([a['id'] for a in m['ancore']],['Impresa Test','01234567890']*2))
+        _,out,_,check=self.fill(src,values)
+        self.assertEqual(len(check['verificate']),4)
+        text='\n'.join(p.text for p in Document(out).paragraphs)
+        self.assertEqual(text.count('Impresa Test'),2)
+        self.assertEqual(text.count('01234567890'),2)
+
+    def test_word_ai_decisions_include_omission_reasons_and_repeated_keys(self):
+        import json
+        decisions={}
+        response=json.dumps([{'posto':1,'campo':'ragione_sociale','motivo':'impresa'},
+                             {'posto':2,'campo':'ragione_sociale','motivo':'stessa impresa'},
+                             {'posto':3,'campo':'','motivo':'firma da confermare'}])
+        with patch.object(agente,'_chiedi',return_value=response):
+            chosen=agente.abbina_pagina('Word',{'1':'a','2':'b','3':'c'},['ragione_sociale'],decisioni=decisions)
+        self.assertEqual(chosen,{'a':'ragione_sociale','b':'ragione_sociale'})
+        self.assertEqual(decisions['c']['motivo'],'firma da confermare')
+
     def test_single_cell_labels_without_placeholders(self):
         labels = ['Nome e Cognome', 'Codice fiscale', 'Ragione sociale.', 'Identificativo pratica']
         def build(d):

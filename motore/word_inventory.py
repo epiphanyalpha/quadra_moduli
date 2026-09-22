@@ -273,8 +273,15 @@ def estrai(dati):
             # preservato. Il modello può classificarli come non_campo.
             ordine_xml = {el: i for i, el in enumerate(p.iter())}
             delimitatori = [ordine_xml[el] for el in p.iter(q('fldChar'))]
-            for m in re.finditer(r' {2,}|\t+', testo):
+            for m in re.finditer(r'[ \t]{2,}|\t', testo):
                 if not testo.strip() or any(i in coperti for i in range(m.start(), m.end())):
+                    continue
+                # Whitespace touching an explicit placeholder is padding, not
+                # another question. Preserve it in the document, not the map.
+                if m.start()-1 in coperti or m.end() in coperti:
+                    continue
+                # Leading indentation has no label and is not an input field.
+                if not testo[:m.start()].strip():
                     continue
                 if any(e in occupati for e, _ in ancore[m.start():m.end()]):
                     continue

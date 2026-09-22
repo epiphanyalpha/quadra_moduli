@@ -6,6 +6,45 @@ Base: repository ufficiale `epiphanyalpha/quadra_moduli`, commit
 
 ## Cosa cambia
 
+### Correzione A dopo il fallimento del modulo 3
+
+Intervento richiesto esplicitamente su A/8505, non su B. Conservato il
+checkpoint precedente 17b7dc2. Eliminati candidati da spazi/tab contigui ai
+segnaposto espliciti e da rientri iniziali; una sequenza mista spazio+tab e
+ora un solo separatore. Sul modulo 3: da 42 a 31 candidati, P.IVA iniziale
+con una sola ancora correttamente etichettata.
+
+Il solo percorso Word richiede al modello una decisione e un motivo per
+ogni posto, esplicita le ripetizioni per lo stesso soggetto, il nome completo
+del sottoscritto e la distinzione fra desinenza, luogo e data di nascita.
+Il percorso PDF mantiene prompt e comportamento predefiniti (nuovo parametro
+opzionale decisioni=None). Non sono imposte assegnazioni specifiche del cliente.
+Registrati proposta, scelta prima della rilettura, bocciatura e risultato per
+ogni ancora in `esiti/.../decisioni_word.json`, privato ed escluso da git.
+I motivi delle omissioni sono visibili nel dettaglio Word gia esistente.
+
+26 test offline superati. Quattro corse reali autorizzate: due sul modulo 3
+(la prima ha rivelato un tab spurio residuo e un nome incompleto, non dichiarata
+riuscita), una sul modulo 1 e una sul modulo 4. Nessun output manualmente
+compilato o abbinamento forzato. La seconda corsa modulo 3 ha 14 scritture
+verificate, fra cui denominazione e P.IVA iniziali E ripetute, nome completo,
+sede, luogo/data nascita e residenza; 11 associazioni richieste controllate
+esplicitamente, audit strutturale superato e tutte le 31 decisioni presenti.
+Due pagine renderizzate tramite anteprima dell'app e ispezionate. Durata
+circa 150 s inclusa anteprima: il problema di latenza resta aperto.
+Desinenza nat__, caselle di scelta, firma e data di firma restano da completare.
+
+Regressioni reali: modulo 1 conserva nome/CF persona/ragione sociale nelle
+celle (11 scritture, 3 pagine); modulo 4 conserva 6 campi anagrafici (1 pagina).
+Tutte le pagine controllate. Il limite CCNL di A nel modulo 1 resta presente
+e rimovibile tramite Togli; SOA aggregate respinte dalla rilettura. Il modulo
+4 non certifica la lettura delle etichette bancarie nude: banca/IBAN restano
+vuoti. Non e una certificazione generale del corpus.
+
+Risultati privati: `esiti/prova_mod3_a_finale`, `esiti/prova_mod1_a_regressione`,
+`esiti/prova_mod4_a_regressione`. Prima prova non riuscita conservata in
+`esiti/prova_mod3_a_copertura`. B invariata al checkpoint fce55ca.
+
 Aggiornamento successivo autorizzato: anche in A rimosso il questionario
 preliminare sulla partecipazione, comprese le checkbox dipendenti. La UI
 passa condizioni=None: nessuna esclusione da risposte preselezionate o

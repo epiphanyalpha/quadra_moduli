@@ -169,6 +169,8 @@ def _lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
     senza_dato = []
     guasti = []
     bocciati = {}
+    decisioni_ai = {}
+    prima_rilettura = {}
 
     if scelte_di_prima is not None:
         yield {"passo": "riuso",
@@ -199,7 +201,7 @@ def _lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
         for tentativo in range(1, TENTATIVI + 1):
             try:
                 deciso = agente.abbina_pagina(testo, indirizzi, chiavi,
-                                              scartate=scartate)
+                                              scartate=scartate, decisioni=decisioni_ai)
                 break
             except agente.RispostaModelloInvalida as storto:
                 if tentativo == TENTATIVI:
@@ -243,6 +245,7 @@ def _lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
         # l'app: stava solo nel banco di prova, quindi i numeri misurati
         # descrivevano il banco e non quello che Bianca ha davanti.
         if chiavi_scelte:
+            prima_rilettura = dict(chiavi_scelte)
             yield {"passo": "correzione",
                    "testo": "Rileggo quello che verrebbe scritto, prima di scriverlo."}
             # `errori` invece dell'eccezione: se la rilettura non riesce -
@@ -304,7 +307,26 @@ def _lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
     # La decisione esce col verdetto: chi vorra' togliere un campo la rimanda
     # indietro, e la bozza si rifa' senza ricomprare il giudizio del modello.
     verdetto["scelte"] = dict(chiavi_scelte)
+    verdetto['decisioni_campi'] = {
+        a['id']: dict(etichetta=a['etichetta'],
+                      proposta=decisioni_ai.get(a['id']),
+                      prima_rilettura=prima_rilettura.get(a['id']),
+                      bocciatura=bocciati.get(a['id']),
+                      finale=chiavi_scelte.get(a['id']),
+                      motivo=("Rimosso dall'utente" if a['id'] in togli else
+                              "Sezione esclusa" if a['id'] in spente else
+                              bocciati.get(a['id']) or
+                              decisioni_ai.get(a['id'], {}).get('motivo') or
+                              ("Decisione riutilizzata" if scelte_di_prima is not None else
+                               "Il modello non ha restituito una decisione per questo campo")),
+                      scritto=a['id'] in scritte)
+        for a in mappa['ancore']}
     verdetto["bozza"] = str(uscita)
+    try:
+        (cartella_lavoro/'decisioni_word.json').write_text(
+            json.dumps(verdetto['decisioni_campi'], ensure_ascii=False, indent=2), encoding='utf-8')
+    except OSError:
+        pass
 
     yield {"passo": "verdetto", "verdetto": verdetto, "bozza": str(uscita),
            "mappa": mappa, "avvisi": verdetto["avvisi"],
