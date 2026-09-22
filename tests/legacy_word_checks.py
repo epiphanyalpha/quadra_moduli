@@ -200,7 +200,7 @@ def _rilettura_vuole_chiavi():
     lo diceva: il verdetto riportava zero scritture e zero errori."""
     import inspect
     from motore import agente, lavorazione_word
-    sorgente = inspect.getsource(lavorazione_word.lavora)
+    sorgente = inspect.getsource(lavorazione_word._lavora)
     dove = sorgente.find("rileggi_documento")
     if dove < 0:
         raise AssertionError("il percorso Word non rilegge piu' prima di scrivere")
@@ -553,7 +553,7 @@ def _rilettura_che_non_riesce():
     # e la lavorazione lo passa davvero
     import inspect
     from motore import lavorazione_word
-    sorgente = inspect.getsource(lavorazione_word.lavora)
+    sorgente = inspect.getsource(lavorazione_word._lavora)
     dove = sorgente.find("rileggi_documento")
     if "errori=" not in sorgente[dove:dove + 200]:
         raise AssertionError("la lavorazione Word non passa `errori`:\n%s"

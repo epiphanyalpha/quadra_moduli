@@ -78,7 +78,8 @@ def leggi(percorso, cartella_lavoro=None):
                             colonna=pos.get('colonna_griglia'), elenco=listing,
                             contesto_cella=context, parte=point['parte'],
                             scrivibile=point['scrivibile'], motivo=point['motivo_tecnico'],
-                            candidato=point.get('candidato', False), tipo_word=point['tipo']))
+                            candidato=point.get('candidato', False), tipo_word=point['tipo'],
+                            etichetta_implicita=point.get('etichetta_implicita', False)))
     anchors.sort(key=lambda a: (a['paragrafo'] if a['paragrafo'] is not None else -1, a['inizio']))
     by_block = defaultdict(list)
     for a in anchors:
@@ -112,6 +113,9 @@ def rendi(mappa):
         pieces = []; last = 0
         for a in sorted(groups[index], key=lambda x:x['inizio']):
             number = str(len(addresses)+1); addresses[number] = a['id']
+            if a['tabella'] is not None and not pieces:
+                pieces.append('[Tabella %s; riga %s; colonna %s] ' %
+                              (a['tabella'], a['riga'], a['colonna']))
             pieces.append(text[last:a['inizio']])
             if a['contesto_cella']:
                 pieces.append('[Etichetta cella: %s] ' % a['contesto_cella'])
@@ -120,7 +124,9 @@ def rendi(mappa):
             if a.get('elenco'):
                 pieces.append(' (riga di un elenco di altri soggetti)')
             if a['candidato']:
-                pieces.append(' (spazio candidato: verificare che chieda un dato)')
+                pieces.append(' (inserimento facoltativo dopo etichetta: compilare solo se la cella chiede un dato; titoli, testo gia compilato e dichiarazioni non sono campi)'
+                              if a.get('etichetta_implicita') else
+                              ' (spazio candidato: verificare che chieda un dato)')
             last = a['fine']
         pieces.append(text[last:])
         rendered = re.sub(r'\s+', ' ', ''.join(pieces)).strip()

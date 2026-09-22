@@ -12,6 +12,8 @@ converte con LibreOffice prima di tutto il resto.
 from __future__ import annotations
 
 import json
+import time
+import uuid
 from pathlib import Path
 
 from motore import agente, soggetti, word
@@ -36,6 +38,51 @@ def _finta_mappa(testo: str, indirizzi: dict) -> dict:
 
 
 def lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
+           pertinenza_confermata: bool = False, togli=(), condizioni=None,
+           scelte_di_prima=None):
+    """Time generator work, excluding time spent in the UI between events.
+
+    Diagnostics contain only durations/counts, never document or profile data.
+    They are local to the already private working directory, not global state.
+    """
+    phases = {}
+    stage = 'preparazione'
+    iterator = _lavora(radice, documento, fascicolo, cartella_lavoro,
+                       pertinenza_confermata, togli, condizioni, scelte_di_prima)
+    diagnostic = {'versione': 1, 'secondi_per_fase': phases}
+    try:
+        while True:
+            start = time.perf_counter()
+            try:
+                event = next(iterator)
+            except StopIteration:
+                break
+            finally:
+                phases[stage] = phases.get(stage, 0.0) + time.perf_counter() - start
+            stage = event.get('passo', 'altro')
+            if event.get('verdetto'):
+                verdict = event['verdetto']
+                verdict['tempi_secondi'] = dict(phases)
+                diagnostic.update(candidati=verdict['campi_totali'],
+                                  assegnati=verdict['assegnati'],
+                                  verificati=len(verdict['verificate']))
+            yield event
+    except Exception as error:
+        diagnostic['errore_tipo'] = type(error).__name__
+        raise
+    finally:
+        iterator.close()
+        try:
+            folder = Path(cartella_lavoro)
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / ('diagnostica_word_' + uuid.uuid4().hex + '.json')).write_text(
+                json.dumps(diagnostic, indent=2), encoding='utf-8')
+        except OSError:
+            # Diagnostics must not discard a successfully generated document.
+            pass
+
+
+def _lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
            pertinenza_confermata: bool = False, togli=(), condizioni=None,
            scelte_di_prima=None):
     """Genera dizionari {passo, testo, ...}. L'ultimo ha sempre 'verdetto'.

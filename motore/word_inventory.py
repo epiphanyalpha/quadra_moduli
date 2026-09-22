@@ -296,12 +296,25 @@ def estrai(dati):
                             start = m.start()
                 aggiungi('spazio_implicito', p, p, inizio=start, fine=m.end(), originale=testo[start:m.end()], candidato=True)
 
+            # A full-width table cell may consist solely of a printed label,
+            # without punctuation or any explicit blank. Expose an OPTIONAL
+            # insertion point, never assume that a title/declaration is a field.
+            # Paired label/value cells keep their existing blank-cell target.
+            tc = antenato(p, 'tc')
+            plain_cell = (tc is not None
+                          and len(tc.getparent().findall('w:tc', NS)) == 1
+                          and len(list(tc.iter(q('p')))) == 1
+                          and re.fullmatch(r'[^:\n\t]{2,100}', testo.strip())
+                          and not any(tc.find('.//' + q(t)) is not None for t in
+                                      ('tbl', 'drawing', 'pict', 'object', 'fldChar', 'fldSimple', 'sdt'))
+                          and not any(tc.find('w:tcPr/w:' + t, NS) is not None
+                                      for t in ('vMerge', 'hMerge')))
             # A labelled line/cell can ask for a value without a drawn placeholder.
-            if (re.fullmatch(r'[^:\n]{2,100}:\s*', testo)
+            if ((re.fullmatch(r'[^:\n]{2,100}:\s*', testo) or plain_cell)
                     and not any(v['paragrafo'] == base for v in risultato['punti'])
                     and not any(e in occupati for e in p.iter())):
                 aggiungi('inserimento_testo', p, p, inizio=len(testo), fine=len(testo),
-                         originale='', candidato=True)
+                         originale='', candidato=True, etichetta_implicita=bool(plain_cell))
 
         for tc in root.iter(q('tc')):
             if any(e in occupati for e in tc.iter()):

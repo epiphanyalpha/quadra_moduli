@@ -66,6 +66,32 @@ class WordTests(unittest.TestCase):
         self.assertEqual(Document(out).paragraphs[0].text.count(value),2)
         self.assertEqual(len(check['verificate']),1)
 
+    def test_single_cell_labels_without_placeholders(self):
+        labels = ['Nome e Cognome', 'Codice fiscale', 'Ragione sociale.', 'Identificativo pratica']
+        def build(d):
+            t = d.add_table(rows=4, cols=1)
+            for row, label in zip(t.rows, labels):
+                row.cells[0].text = label
+        src = self.source(build)
+        m = word.leggi(src)
+        self.assertEqual(len(m['ancore']), 4)
+        self.assertTrue(all(a['etichetta_implicita'] for a in m['ancore']))
+        text, addresses = word.rendi(m)
+        self.assertEqual(len(addresses), 4)
+        self.assertIn('inserimento facoltativo', text)
+        values = {a['id']: 'Dato sintetico %d' % i for i, a in enumerate(m['ancore'])}
+        _, out, _, check = self.fill(src, values)
+        self.assertEqual(len(check['verificate']), 4)
+        for i, row in enumerate(Document(out).tables[0].rows):
+            self.assertEqual(row.cells[0].text, labels[i] + ' Dato sintetico %d' % i)
+
+    def test_table_title_candidate_is_never_automatically_filled(self):
+        src = self.source(lambda d: setattr(d.add_table(rows=1, cols=1).cell(0,0), 'text', 'DICHIARAZIONI'))
+        m, out, report, check = self.fill(src, {})
+        self.assertEqual(len(m['ancore']), 1)
+        self.assertFalse(report['scritture'])
+        self.assertEqual(Document(out).tables[0].cell(0,0).text, 'DICHIARAZIONI')
+
     def test_arbitrary_label_cannot_truncate_company_name(self):
         src=self.source(lambda d:d.add_paragraph('Società: ___'))
         m=word.leggi(src)
@@ -194,6 +220,13 @@ class WordTests(unittest.TestCase):
         self.assertEqual(verdict['esito'],'compilato')
         self.assertEqual(verdict['assegnati'],4)
         self.assertTrue(Path(verdict['bozza']).exists())
+        self.assertIn('valori', verdict['tempi_secondi'])
+        self.assertIn('correzione', verdict['tempi_secondi'])
+        self.assertIn('scrittura', verdict['tempi_secondi'])
+        logs = list((self.root/'work').glob('diagnostica_word_*.json'))
+        self.assertEqual(len(logs), 1)
+        for value in profile['profilo'].values():
+            self.assertNotIn(value, logs[0].read_text(encoding='utf-8'))
 
     def test_empty_mapping_and_review_failure_are_not_success(self):
         src=self.source(lambda d:paragraphs(d,'___')); m=word.leggi(src)
