@@ -159,6 +159,8 @@ def estrai(dati):
                 p = next(corpo.iter(q('p')), None)
             tipo_sdt = 'sdt_casella' if cb is not None else 'sdt_testo' if testuale else 'sdt_rich_text'
             v = aggiungi(tipo_sdt, sdt, p)
+            v['etichette_sdt'] = {name: pr.find('w:' + name, NS).get(q('val'), '')
+                                  for name in ('alias', 'tag') if pr.find('w:' + name, NS) is not None}
             if (list(corpo.iter(q('sdt'))) or any(corpo.find('.//' + q(tag)) is not None
                                                 for tag in ('tbl', 'drawing', 'pict', 'object', 'fldChar', 'fldSimple'))):
                 v.update(scrivibile=False, motivo_tecnico='Controllo Word strutturato: scrittura da verificare')
@@ -168,15 +170,42 @@ def estrai(dati):
                 v['sottotipo_sdt'] = strutturati[0]
                 v['opzioni_sdt'] = [e.get(q('displayText'), e.get(q('value'), ''))
                                     for e in pr.iter(q('listItem'))]
-                v.update(scrivibile=False, motivo_tecnico='Controllo data/elenco: stato Word da aggiornare manualmente')
+                if strutturati[0] == 'date':
+                    from .word_date import converti as converti_data
+                    date = pr.find('w:date', NS)
+                    fmt = date.find('w:dateFormat', NS)
+                    cal = date.find('w:calendar', NS)
+                    v['formato_data'] = fmt.get(q('val'), '') if fmt is not None else ''
+                    v['calendario_data'] = cal.get(q('val'), 'gregorian') if cal is not None else 'gregorian'
+                    try:
+                        converti_data('2000-01-02', v['formato_data'], v['calendario_data'])
+                    except ValueError as exc:
+                        v.update(scrivibile=False, motivo_tecnico=str(exc))
+                else:
+                    v.update(scrivibile=False, motivo_tecnico='Controllo elenco: stato Word da aggiornare manualmente')
+            if cb is None and not list(corpo.iter(q('sdt'))):
+                placeholder = pr.find('w:showingPlcHdr', NS)
+                showing = placeholder is not None and placeholder.get(q('val'), '1') not in {'0', 'false', 'off'}
+                content = ''.join(t.text or '' for t in corpo.iter(q('t'))).strip()
+                standard_placeholder = content.casefold() in {
+                    'fare clic qui per immettere testo.', 'fare clic qui per immettere una data.',
+                    'click or tap here to enter text.', 'click or tap to enter a date.'}
+                if content and not showing and not standard_placeholder and not VUOTO.fullmatch(content):
+                    v.update(scrivibile=False, motivo_tecnico='Controllo gia compilato: contenuto originale preservato')
             if cb is not None:
                 checked = cb.find('w14:checked', NS)
                 v['spuntata'] = checked is not None and checked.get('{' + W14 + '}val', '0') not in {'0', 'false', 'off'}
-            if pr.find('w:dataBinding', NS) is not None or pr.find('w:lock', NS) is not None or len(list(corpo.iter(q('p')))) > 1:
+            def contenuto_protetto(props):
+                lock = props.find('w:lock', NS)
+                # sdtLocked protects the container from deletion, not its contents.
+                # Unknown/malformed lock values remain conservatively blocked.
+                return lock is not None and lock.get(q('val')) not in {'sdtLocked', 'unlocked'}
+
+            if pr.find('w:dataBinding', NS) is not None or contenuto_protetto(pr) or len(list(corpo.iter(q('p')))) > 1:
                 v.update(scrivibile=False, motivo_tecnico='Controllo collegato, protetto o su più paragrafi')
             for outer in sdt.iterancestors(q('sdt')):
                 outer_pr = outer.find('w:sdtPr', NS)
-                if outer_pr is not None and any(outer_pr.find('w:' + tag, NS) is not None for tag in ('lock', 'dataBinding')):
+                if outer_pr is not None and (contenuto_protetto(outer_pr) or outer_pr.find('w:dataBinding', NS) is not None):
                     v.update(scrivibile=False, motivo_tecnico='Controllo dentro un contenitore protetto o collegato')
             if not list(corpo.iter(q('sdt'))):
                 occupati.update(corpo.iter())

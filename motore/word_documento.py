@@ -54,7 +54,8 @@ def leggi(percorso, cartella_lavoro=None):
     _, roots = inventory.apri(data)
     # Plain empty body paragraphs are usually layout. Label-only paragraphs are explicit candidates.
     physical['punti'] = [p for p in physical['punti'] if p['tipo'] != 'paragrafo_vuoto']
-    probes = {p['riferimento']: True if p['tipo'].endswith('casella') else 'VALORE'
+    probes = {p['riferimento']: True if p['tipo'].endswith('casella') else
+              '2000-01-02' if p.get('sottotipo_sdt') == 'date' else 'VALORE'
               for p in physical['punti'] if p['scrivibile']}
     _, _, ops, rejected = patch.prepara_operazioni(data, physical, probes)
     positions = {o['punto']['riferimento']: (o['inizio'], o['fine']) for o in ops}
@@ -74,7 +75,8 @@ def leggi(percorso, cartella_lavoro=None):
         pos = point.get('posizione_cella') or {}
         anchors.append(dict(id=ref, tipo=kind, paragrafo=block_index.get(point['paragrafo']),
                             inizio=start, fine=end, capienza=max(end-start, 1) if kind == 'riempimento' else 60,
-                            etichetta='', tabella=pos.get('tabella'), riga=pos.get('riga'),
+                            etichetta='', etichette_sdt=point.get('etichette_sdt', {}),
+                            tabella=pos.get('tabella'), riga=pos.get('riga'),
                             colonna=pos.get('colonna_griglia'), elenco=listing,
                             contesto_cella=context, parte=point['parte'],
                             scrivibile=point['scrivibile'], motivo=point['motivo_tecnico'],
@@ -91,6 +93,8 @@ def leggi(percorso, cartella_lavoro=None):
         for a in group:
             label = text[previous:a['inizio']]
             a['etichetta'] = re.sub(r'\s+', ' ', label).strip(' :.-–')[-100:] or a['contesto_cella']
+            labels = a.get('etichette_sdt', {})
+            a['etichetta'] = labels.get('alias') or labels.get('tag') or a['etichetta']
             previous = max(previous, a['fine'])
     return dict(documento=source.name, formato='word', convertito_da=None if usable == source else source.name,
                 ancore=anchors, righe=[(i,b['testo']) for i,b in enumerate(blocks)],
@@ -119,6 +123,9 @@ def rendi(mappa):
             pieces.append(text[last:a['inizio']])
             if a['contesto_cella']:
                 pieces.append('[Etichetta cella: %s] ' % a['contesto_cella'])
+            if a.get('etichette_sdt'):
+                labels = ' / '.join(dict.fromkeys(v for v in a['etichette_sdt'].values() if v))
+                pieces.append('[Etichetta controllo Word: %s] ' % labels)
             # No PDF-style capacity: the Word text flows and placeholder length is not a limit.
             pieces.append('«%s:%s»' % (number, 'casella' if a['tipo']=='casella' else 'testo'))
             if a.get('elenco'):

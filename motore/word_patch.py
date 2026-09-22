@@ -147,6 +147,9 @@ def prepara_operazioni(dati, fisico, valori):
                     raise ValueError('Casella Word senza risultato testuale singolo')
                 extra['testi_sdt'] = ts
                 extra['corpo_sdt'] = corpo
+                if punto.get('sottotipo_sdt') == 'date':
+                    from .word_date import converti as converti_data
+                    scritto, extra['data_iso'] = converti_data(valore, punto['formato_data'], punto['calendario_data'])
                 if tipo == 'sdt_casella':
                     cb = el.find('w:sdtPr/w14:checkbox', NS)
                     stato = cb.find('w14:checkedState' if valore else 'w14:uncheckedState', NS)
@@ -266,6 +269,8 @@ def scrivi(dati, fisico, valori):
                 _font_simbolo(antenato(ts[0], 'r'), op['font_casella'])
             pr = el.find('w:sdtPr', NS); placeholder = pr.find('w:showingPlcHdr', NS)
             if placeholder is not None: pr.remove(placeholder)
+            if op.get('data_iso'):
+                pr.find('w:date', NS).set(q('fullDate'), op['data_iso'])
         elif tipo.startswith('form_'):
             if op['fine'] > op['inizio']:
                 _intervallo(p, op['inizio'], op['fine'], op['scritto'])
@@ -290,7 +295,8 @@ def scrivi(dati, fisico, valori):
             _intervallo(p, op['inizio'], op['fine'], valore)
         modifiche.append(dict(riferimento=punto['riferimento'], tipo=tipo, parte=punto['parte'],
                               percorso_paragrafo=punto['percorso_paragrafo'], percorso_controllo=punto['percorso'],
-                              indice_controllo=op.get('indice_controllo'), valore=op['valore'], valore_scritto=op['scritto']))
+                              indice_controllo=op.get('indice_controllo'), data_iso=op.get('data_iso'),
+                              valore=op['valore'], valore_scritto=op['scritto']))
     for parte in {m['parte'] for m in modifiche}:
         parti_modificate[parte] = serializza(parti[parte])
     risultato = salva(dati, parti_modificate) if modifiche else dati
@@ -315,6 +321,17 @@ def verifica_collocazione(originale, compilato, piano):
         if final is None: continue
         def struttura(el):
             cp = deepcopy(el)
+            # Block-level SDTs keep properties outside paragraphs. Normalize only
+            # the explicitly authorized date state, verified separately below.
+            for change in piano['modifiche']:
+                if change['parte'] != parte or not change.get('data_iso'):
+                    continue
+                control = nodo(cp, change['percorso_controllo'])
+                props = control.find('w:sdtPr', NS)
+                date = props.find('w:date', NS)
+                date.attrib.pop(q('fullDate'), None)
+                for marker in props.findall('w:showingPlcHdr', NS):
+                    props.remove(marker)
             # Il testo dei paragrafi e le loro proprietà hanno verifiche
             # dedicate; qui restano tabelle, celle, sezioni e contenitori.
             for p in reversed(list(cp.iter(q('p')))):
@@ -344,6 +361,16 @@ def verifica_collocazione(originale, compilato, piano):
     numeri, _ = numerazioni(dopo)
     for m in piano['modifiche']:
         tipo = m['tipo']
+        if m.get('data_iso'):
+            try:
+                sdt = nodo(finali[m['parte']], m['percorso_controllo'])
+                date = sdt.find('w:sdtPr/w:date', NS)
+                if date is None or date.get(q('fullDate')) != m['data_iso']:
+                    errori.append('Stato data Word errato')
+                if sdt.find('w:sdtPr/w:showingPlcHdr', NS) is not None:
+                    errori.append('Data Word ancora marcata come segnaposto')
+            except (ValueError, AttributeError):
+                errori.append('Stato data Word non rileggibile')
         if not tipo.endswith('casella'): continue
         try:
             p = nodo(finali[m['parte']], m['percorso_paragrafo'])

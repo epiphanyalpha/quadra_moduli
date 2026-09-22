@@ -313,7 +313,8 @@ def _lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
                       prima_rilettura=prima_rilettura.get(a['id']),
                       bocciatura=bocciati.get(a['id']),
                       finale=chiavi_scelte.get(a['id']),
-                      motivo=("Rimosso dall'utente" if a['id'] in togli else
+                      motivo=(a['motivo'] if not a.get('scrivibile', True) else
+                              "Rimosso dall'utente" if a['id'] in togli else
                               "Sezione esclusa" if a['id'] in spente else
                               bocciati.get(a['id']) or
                               decisioni_ai.get(a['id'], {}).get('motivo') or

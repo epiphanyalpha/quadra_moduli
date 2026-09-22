@@ -58,6 +58,51 @@ class WordTests(unittest.TestCase):
                     self.assertIn(value,text)
                 self.assertEqual(check['verifica_visiva'],'NON_ESEGUITA')
 
+    def test_sdt_lock_semantics_and_metadata(self):
+        for mode in ('sdtLocked', 'unlocked', 'contentLocked', 'sdtContentLocked', 'unknown'):
+            for rich in (False, True):
+                with self.subTest(mode=mode, rich=rich):
+                    def build(d):
+                        controls(d)
+                        for i, control in enumerate(d.element.iter(qn('w:sdt'))):
+                            pr=control.find(qn('w:sdtPr'))
+                            if rich:
+                                pr.remove(pr.find(qn('w:text')))
+                            for tag,value in [('lock',mode),('alias','Campo '+str(i)),('tag','Tag '+str(i))]:
+                                for old in pr.findall(qn('w:'+tag)):
+                                    pr.remove(old)
+                                node=OxmlElement('w:'+tag); node.set(qn('w:val'),value); pr.append(node)
+                            pr.append(OxmlElement('w:showingPlcHdr'))
+                    src=self.source(build)
+                    m=word.leggi(src)
+                    writable=mode in ('sdtLocked','unlocked')
+                    self.assertEqual(sum(a['scrivibile'] for a in m['ancore']),4 if writable else 0)
+                    if writable:
+                        rendered,addresses=word.rendi(m)
+                        self.assertIn('Campo 0 / Tag 0',rendered)
+                        self.assertEqual(len(addresses),4)
+                        _,out,report,check=self.fill(src)
+                        self.assertEqual(len(check['verificate']),4)
+                        _,roots=word_inventory.apri(out.read_bytes())
+                        for control in roots['word/document.xml'].iter(qn('w:sdt')):
+                            pr=control.find(qn('w:sdtPr'))
+                            self.assertEqual(pr.find(qn('w:lock')).get(qn('w:val')),mode)
+                            self.assertIsNone(pr.find(qn('w:showingPlcHdr')))
+                    else:
+                        _,out,report,check=self.fill(src)
+                        self.assertEqual(len(report['scritture']),0)
+
+    def test_sdt_deletion_lock_does_not_override_binding_or_date(self):
+        for special in ('dataBinding','date'):
+            def build(d):
+                controls(d)
+                for control in d.element.iter(qn('w:sdt')):
+                    pr=control.find(qn('w:sdtPr'))
+                    lock=OxmlElement('w:lock'); lock.set(qn('w:val'),'sdtLocked'); pr.append(lock)
+                    pr.append(OxmlElement('w:'+special))
+            m=word.leggi(self.source(build))
+            self.assertFalse(any(a['scrivibile'] for a in m['ancore']))
+
     def test_repeated_address_stays_complete(self):
         value='Via delle Rose 12 Roma'
         src=self.source(lambda d:d.add_paragraph('Residenza: '+value+'; Sede legale: ___'))
@@ -189,6 +234,8 @@ class WordTests(unittest.TestCase):
             controls(d)
             for control in d.element.iter(qn('w:sdt')):
                 pr=control.find(qn('w:sdtPr')); pr.remove(pr.find(qn('w:text')))
+                # An unfilled multi-run placeholder is explicitly marked by Word.
+                pr.append(OxmlElement('w:showingPlcHdr'))
                 content=control.find(qn('w:sdtContent'))
                 r=OxmlElement('w:r'); t=OxmlElement('w:t'); t.text=' Altro frammento'
                 r.append(t); content.append(r)
