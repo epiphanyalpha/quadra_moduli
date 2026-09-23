@@ -35,6 +35,38 @@ def _run(p, valore, modello_run=None):
     return r
 
 
+def _stili_segnaposto(contenuti):
+    """Gli id dello stile "Placeholder Text": cambiano con la lingua di Word."""
+    ids = {'PlaceholderText', 'Testosegnaposto'}
+    if 'word/styles.xml' in contenuti:
+        for s in ET.fromstring(contenuti['word/styles.xml']).findall('w:style', NS):
+            nome = s.find('w:name', NS)
+            if nome is not None and nome.get(q('val'), '').casefold() == 'placeholder text':
+                ids.add(s.get(q('styleId')))
+    return ids
+
+
+def _stile_come_word(run, sdt, stili_segnaposto):
+    """Il valore prende lo stile del controllo, come quando si scrive in Word.
+
+    Senza, eredita quello del segnaposto: grigio e in un altro carattere, e sul
+    foglio il dato sembra un campo ancora da compilare. Si tocca solo un run
+    con lo stile del segnaposto; qualunque altra formattazione resta com'e'.
+    """
+    pr = run.find('w:rPr', NS)
+    stile = pr.find('w:rStyle', NS) if pr is not None else None
+    if stile is None or stile.get(q('val')) not in stili_segnaposto:
+        return
+    del_controllo = sdt.find('w:sdtPr/w:rPr', NS)
+    run.remove(pr)
+    if del_controllo is not None:
+        run.insert(0, deepcopy(del_controllo))
+    else:
+        pr.remove(stile)
+        if len(pr):
+            run.insert(0, pr)
+
+
 def _font_simbolo(run, nome):
     pr = run.find('w:rPr', NS)
     if pr is None: pr = ET.Element(q('rPr')); run.insert(0, pr)
@@ -248,6 +280,7 @@ def scrivi(dati, fisico, valori):
             testo = testo[:op['inizio']] + op['scritto'] + testo[op['fine']:]
         attesi[chiave] = testo
     modifiche, parti_modificate = [], {}
+    stili_segnaposto = _stili_segnaposto(contenuti)
     for op in sorted(ops, key=lambda o: (o['punto']['parte'], o['punto']['percorso_paragrafo'], o['inizio']), reverse=True):
         if id(op) in esclusi: continue
         punto = op['punto']; tipo = punto['tipo']; el = op['el']; p = op['p']
@@ -259,6 +292,8 @@ def scrivi(dati, fisico, valori):
                 _testo(ts[0], op['scritto'])
                 for t in ts[1:]:
                     _testo(t, '')
+                if tipo != 'sdt_casella':
+                    _stile_come_word(antenato(ts[0], 'r'), el, stili_segnaposto)
             else:
                 container = next(op['corpo_sdt'].iter(q('p')), op['corpo_sdt'])
                 container.append(_run(p, op['scritto']))
@@ -308,6 +343,66 @@ def scrivi(dati, fisico, valori):
     return risultato, dict(modifiche=modifiche, residui=residui, piano_audit=piano_audit, verifica=verifica)
 
 
+def scrivi_con_ripiego(dati, fisico, valori):
+    """Come `scrivi`, ma un campo che non regge non fa perdere il documento.
+
+    Se la scrittura o l'audit falliscono si cercano, per dicotomia sui
+    paragrafi, le scritture colpevoli; si tolgono quelle e si riscrive il resto,
+    con lo stesso audit. Quando tutto passa al primo colpo e' `scrivi` e basta:
+    stessa uscita, byte per byte. Torna (documento, esito, scartati) dove
+    scartati e' {riferimento: motivo}.
+    """
+    if fisico['docx_sha256'] != hashlib.sha256(dati).hexdigest():
+        raise ValueError('Le posizioni appartengono a un altro originale')
+    try:
+        risultato, esito = scrivi(dati, fisico, valori)
+        return risultato, esito, {}
+    except Exception:  # noqa: BLE001 - qualunque guasto qui e' di un campo, non del documento
+        pass
+    per_rif = {p['riferimento']: p for p in fisico['punti']}
+    gruppi = defaultdict(list)
+    for ref in valori:
+        punto = per_rif.get(ref, {})
+        gruppi[punto.get('parte'), punto.get('percorso_paragrafo') or ref].append(ref)
+    gruppi = list(gruppi.values())
+    motivi = {}
+
+    def regge(insieme):
+        try:
+            scrivi(dati, fisico, {r: valori[r] for g in insieme for r in g})
+            return True
+        except Exception as exc:  # noqa: BLE001
+            for g in insieme:
+                for r in g:
+                    motivi.setdefault(r, '%s: %s' % (type(exc).__name__, str(exc)[:160]))
+            return False
+
+    def colpevoli(insieme):
+        if regge(insieme):
+            return []
+        if len(insieme) == 1:
+            return insieme
+        meta = len(insieme) // 2
+        return colpevoli(insieme[:meta]) + colpevoli(insieme[meta:])
+
+    cattivi = colpevoli(gruppi)
+    buoni = [g for g in gruppi if g not in cattivi]
+    if not regge(buoni):
+        # Guasto che nasce solo dall'incontro di paragrafi che da soli reggono:
+        # si aggiungono uno alla volta e si tiene chi non rompe.
+        tenuti = []
+        for g in buoni:
+            if regge(tenuti + [g]):
+                tenuti.append(g)
+            else:
+                cattivi.append(g)
+        buoni = tenuti
+    scartati = {r: 'Scrittura non superata dalla verifica, da compilare a mano (%s)' % motivi.get(r, '')
+                for g in cattivi for r in g}
+    risultato, esito = scrivi(dati, fisico, {r: valori[r] for g in buoni for r in g})
+    return risultato, esito, scartati
+
+
 def verifica_collocazione(originale, compilato, piano):
     prima, roots = apri(originale); dopo, finali = apri(compilato)
     errori = []
@@ -322,16 +417,22 @@ def verifica_collocazione(originale, compilato, piano):
         def struttura(el):
             cp = deepcopy(el)
             # Block-level SDTs keep properties outside paragraphs. Normalize only
-            # the explicitly authorized date state, verified separately below.
+            # the states that writing is authorized to change - placeholder
+            # marker, date, checkbox - each verified separately below. Before,
+            # only the date was normalized: writing any block-level or cell
+            # control that showed its placeholder failed the whole document.
             for change in piano['modifiche']:
-                if change['parte'] != parte or not change.get('data_iso'):
+                if change['parte'] != parte or not change['tipo'].startswith('sdt_'):
                     continue
                 control = nodo(cp, change['percorso_controllo'])
                 props = control.find('w:sdtPr', NS)
-                date = props.find('w:date', NS)
-                date.attrib.pop(q('fullDate'), None)
                 for marker in props.findall('w:showingPlcHdr', NS):
                     props.remove(marker)
+                if change.get('data_iso'):
+                    props.find('w:date', NS).attrib.pop(q('fullDate'), None)
+                if change['tipo'] == 'sdt_casella':
+                    for chk in props.findall('w14:checkbox/w14:checked', NS):
+                        chk.getparent().remove(chk)
             # Il testo dei paragrafi e le loro proprietà hanno verifiche
             # dedicate; qui restano tabelle, celle, sezioni e contenitori.
             for p in reversed(list(cp.iter(q('p')))):
@@ -371,6 +472,13 @@ def verifica_collocazione(originale, compilato, piano):
                     errori.append('Data Word ancora marcata come segnaposto')
             except (ValueError, AttributeError):
                 errori.append('Stato data Word non rileggibile')
+        elif tipo.startswith('sdt_'):
+            try:
+                sdt = nodo(finali[m['parte']], m['percorso_controllo'])
+                if sdt.find('w:sdtPr/w:showingPlcHdr', NS) is not None:
+                    errori.append('Controllo Word ancora marcato come segnaposto')
+            except ValueError:
+                errori.append('Controllo Word non rileggibile')
         if not tipo.endswith('casella'): continue
         try:
             p = nodo(finali[m['parte']], m['percorso_paragrafo'])

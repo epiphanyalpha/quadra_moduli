@@ -142,3 +142,26 @@ conservata. La suite resta interamente offline; la corsa reale e' separata.
 
 Il repository remoto di questa copia punta alla clone locale di riferimento,
 non al repository ufficiale. La pubblicazione richiede una richiesta esplicita.
+
+## Rete sui guasti e controlli Word (23 settembre, branch claude/word-rete)
+
+- I controlli a livello di paragrafo o di cella con segnaposto visibile
+  facevano fallire l'audit di TUTTO il documento: l'audit giustificava la
+  rimozione di `showingPlcHdr` solo per le date. Ora vale per ogni controllo
+  scritto, e si verifica a parte che il marcatore sia davvero tolto.
+- Il valore scritto in un controllo prendeva lo stile "Testo segnaposto"
+  (grigio, altro carattere). Ora prende lo stile del controllo, come in Word.
+- `word_patch.scrivi_con_ripiego`: se scrittura o audit falliscono, si
+  isolano per dicotomia i paragrafi colpevoli, si tolgono quelli e si
+  riscrive il resto. Quando tutto passa l'uscita e' identica a `scrivi`.
+- La lettura fa una scrittura di prova completa, audit compreso: un campo che
+  non regge diventa manuale prima di chiamare il modello.
+- `tests/barriera_word.py`: fotografia e confronto su un corpus, senza AI.
+
+Confronto prima/dopo su 80 documenti (48 gare, 26 moduli comunali, 6 di
+Bianca con le decisioni reali riusate): testo per l'AI identico su 80 su 80;
+conteggi identici; bozze identiche nel contenuto XML salvo lo stile dei run
+dentro i controlli nei 3 moduli D.Lgs 36/2023. "Cause di esclusione" con tutti
+i campi: prima ValueError, ora 74 su 74 verificati. Le differenze di byte sui
+.doc vengono dalla conversione LibreOffice (orari nello ZIP, ObjectID OLE).
+Lettura: +2 s circa sui moduli piu' grandi per la prova preventiva.

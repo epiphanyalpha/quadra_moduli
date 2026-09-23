@@ -300,7 +300,8 @@ def _lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
     verdetto["esito"] = ("non_compilato" if not verdetto["verificate"] else
                          "da_verificare" if (verdetto["irrisolti"] or guasti or
                                               verdetto["avvisi_tecnici"] or
-                                              verdetto["non_trovate"]) else "compilato")
+                                              verdetto["non_trovate"] or
+                                              verdetto["mancate"]) else "compilato")
     verdetto["senza_dato"] = sorted(set(senza_dato))
     verdetto["spenti"] = len(spente)
     verdetto["valori"] = valori

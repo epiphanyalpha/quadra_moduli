@@ -60,6 +60,12 @@ def leggi(percorso, cartella_lavoro=None):
     _, _, ops, rejected = patch.prepara_operazioni(data, physical, probes)
     positions = {o['punto']['riferimento']: (o['inizio'], o['fine']) for o in ops}
     failures = {r['riferimento']: r['motivo'] for r in rejected}
+    # Full dry run, audit included, BEFORE asking the model: a point that would
+    # fail the audit is manual from the start instead of failing the document
+    # after the model has been paid. When everything passes nothing changes.
+    _, _, dry_run_failures = patch.scrivi_con_ripiego(
+        data, physical, {r: v for r, v in probes.items() if r not in failures})
+    failures.update(dry_run_failures)
     blocks = physical['blocchi']
     block_index = {b['id']: i for i, b in enumerate(blocks)}
     anchors = []
@@ -161,7 +167,8 @@ def scrivi(percorso, mappa, valori, uscita):
         chosen[ref] = (True if a['tipo']=='casella' else
                        _senza_ripetizione(a['etichetta'], str(value).strip())
                        if a['tipo']=='riempimento' and not a['contesto_cella'] else str(value).strip())
-    output, audit = patch.scrivi(data, mappa['inventario'], chosen)
+    # A write that fails the audit is dropped and reported, not fatal to the draft.
+    output, audit, dropped = patch.scrivi_con_ripiego(data, mappa['inventario'], chosen)
     target = Path(uscita); target.parent.mkdir(parents=True, exist_ok=True); target.write_bytes(output)
     writes = []
     for change in audit['modifiche']:
@@ -173,6 +180,8 @@ def scrivi(percorso, mappa, valori, uscita):
                            percorso_paragrafo=change['percorso_paragrafo']))
     missed=[dict(ancora=r['riferimento'],valore=original_values.get(r['riferimento'],''),motivo=r['motivo'])
             for r in audit['residui']]
+    missed += [dict(ancora=ref, valore=original_values.get(ref, ''), motivo=reason)
+               for ref, reason in dropped.items()]
     return dict(bozza=str(target),scritture=writes,mancate=missed,
                 originale_docx=mappa['originale_docx'],originale_sha256=_sha(data),piano_audit=audit['piano_audit'])
 
