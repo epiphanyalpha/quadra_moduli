@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import base64
 import json
+import contextlib
+import contextvars
 import os
 import re
 from pathlib import Path
@@ -109,23 +111,62 @@ def disponibile() -> bool:
     return bool(BASE and CHIAVE and MODELLO)
 
 
+# Un modello diverso per un pezzo di lavoro, senza toccare quello di tutti.
+# ContextVar e non una globale: l'app serve piu' sessioni insieme, e un Word
+# che cambia modello non deve cambiarlo al PDF che gira accanto.
+_IN_USO = contextvars.ContextVar("quadra_modello_in_uso", default=None)
+
+
+def config_word():
+    """Il modello per i Word, se e' configurato; altrimenti None.
+
+    Misurato il 28/09 su 20 moduli di gara: Gemini 3.8 Flash (via OpenRouter)
+    scrive quanto DeepSeek, sbaglia di meno sul CCNL e ci mette meta' tempo -
+    DeepSeek ragiona a lungo prima di rispondere. Senza QUADRA_WORD_CHIAVE si
+    usa il modello di sempre e non cambia niente.
+    """
+    base = os.environ.get("QUADRA_WORD_BASE_URL", "").strip().rstrip("/")
+    chiave = os.environ.get("QUADRA_WORD_CHIAVE", "").strip()
+    modello = os.environ.get("QUADRA_WORD_MODELLO", "").strip()
+    if not (base and chiave and modello):
+        return None
+    if base.endswith("/chat/completions"):
+        base = base[: -len("/chat/completions")]
+    # Gemini rifiuta i tetti da modello che ragiona: 32768 basta e avanza.
+    return (base, chiave, modello, int(os.environ.get("QUADRA_WORD_TETTO_GETTONI", "32768")))
+
+
+@contextlib.contextmanager
+def usando(config):
+    """Dentro il blocco le chiamate vanno a `config`; None = il modello di sempre."""
+    if config is None:
+        yield
+        return
+    segno = _IN_USO.set(config)
+    try:
+        yield
+    finally:
+        _IN_USO.reset(segno)
+
+
 def _chiedi(messaggi: list, temperatura: float = 0.0, tetto: int = None) -> str:
-    if not disponibile():
+    base, chiave, modello, tetto_di_base = _IN_USO.get() or (BASE, CHIAVE, MODELLO, TETTO_GETTONI)
+    if not (base and chiave and modello):
         raise ModelloAssente(
             "Configura QUADRA_BASE_URL, QUADRA_CHIAVE e QUADRA_MODELLO in .env "
             "(endpoint compatibile con /chat/completions).")
     import time as _tempo
 
     import requests
-    tetto = tetto or TETTO_GETTONI
+    tetto = tetto or tetto_di_base
     ultimo = None
     for tentativo in range(TENTATIVI_RETE):
         try:
             risposta = requests.post(
-                BASE + "/chat/completions",
-                headers={"Authorization": "Bearer " + CHIAVE,
+                base + "/chat/completions",
+                headers={"Authorization": "Bearer " + chiave,
                          "Content-Type": "application/json"},
-                json={"model": MODELLO, "messages": messaggi,
+                json={"model": modello, "messages": messaggi,
                       "max_tokens": tetto, "temperature": temperatura},
                 timeout=600)
             risposta.raise_for_status()
@@ -704,7 +745,11 @@ def rileggi_documento(rese, scelte: dict, anagrafe, immagini=None,
             testo = con_i_valori(p["testo"], p["indirizzi"], scelte, anagrafe)
             if "=[ " not in testo:
                 continue          # su questa pagina non abbiamo scritto niente
-            lavori.append((p, squadra.submit(rileggi_pagina, testo, p["indirizzi"],
+            # Il modello in uso deve seguire la rilettura nei thread: una copia
+            # del contesto per lavoro, perche' un contesto non si apre in due
+            # thread insieme.
+            lavori.append((p, squadra.submit(contextvars.copy_context().run,
+                                             rileggi_pagina, testo, p["indirizzi"],
                                              (immagini or {}).get(p["pagina"]))))
         for p, lavoro in lavori:
             try:

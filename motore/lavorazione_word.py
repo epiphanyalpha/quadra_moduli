@@ -134,13 +134,17 @@ def _lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
                          "La lettura potrebbe essere incompleta: il modulo non e' compilato."}
         return
 
+    # Il modello dei Word, se configurato; None = quello di sempre.
+    word_ai = agente.config_word()
+
     if pertinenza_confermata:
         yield {"passo": "pertinenza_ok",
                "testo": "Mi hai confermato che il modulo e' di questa impresa: vado avanti."}
     else:
         yield {"passo": "pertinenza",
                "testo": "Controllo che il modulo sia di questa impresa."}
-        giudizio = agente.pertinenza(testo[:4000], fascicolo)
+        with agente.usando(word_ai):
+            giudizio = agente.pertinenza(testo[:4000], fascicolo)
         if not giudizio.get("pertinente", True):
             yield {"passo": "domanda_bloccante", "verdetto": None,
                    "domanda": giudizio.get("domanda") or giudizio.get("motivo"),
@@ -198,21 +202,32 @@ def _lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
         # illeggibile una volta e il modulo intero e' andato perso, mentre
         # rifacendo la stessa identica domanda e' tornata un JSON pulito. E'
         # un guasto di passaggio, e costa una chiamata solo quando capita.
-        for tentativo in range(1, TENTATIVI + 1):
+        #
+        # Con un modello per i Word, dopo i suoi due tentativi ce n'e' un terzo
+        # col modello di sempre: su 03_arca_brindisi (170 posti) Gemini ha
+        # risposto illeggibile due volte e il modulo era perso; rifatta dopo,
+        # la stessa domanda e' tornata pulita. Un guasto di passaggio non deve
+        # costare un modulo a chi lavora.
+        giri = [word_ai] * TENTATIVI + ([None] if word_ai else [])
+        for tentativo, config in enumerate(giri, 1):
             try:
-                deciso = agente.abbina_pagina(testo, indirizzi, chiavi,
-                                              scartate=scartate, decisioni=decisioni_ai)
+                with agente.usando(config):
+                    deciso = agente.abbina_pagina(testo, indirizzi, chiavi,
+                                                  scartate=scartate, decisioni=decisioni_ai)
                 break
             except agente.RispostaModelloInvalida as storto:
-                if tentativo == TENTATIVI:
+                if tentativo == len(giri):
                     yield {"passo": "verdetto", "verdetto": None,
                            "testo": "Il modello ha risposto in un modo che non "
-                                    "riesco a leggere, due volte di fila: %s. "
-                                    "Non ho scritto niente." % storto}
+                                    "riesco a leggere, %s: %s. Non ho scritto "
+                                    "niente." % ("due volte di fila" if len(giri) == 2
+                                                 else "anche col modello di riserva",
+                                                 storto)}
                     return
                 yield {"passo": "valori", "tentativo": tentativo,
                        "testo": "La risposta e' arrivata illeggibile: "
-                                "richiedo la stessa cosa."}
+                                + ("richiedo la stessa cosa." if giri[tentativo] is config
+                                   else "la chiedo al modello di riserva.")}
         deciso = {a: c for a, c in deciso.items() if a not in spente}
         if scartate:
             yield {"passo": "valori", "tentativo": 1,
@@ -255,9 +270,17 @@ def _lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
             # scrive quello che non si e' potuto rileggere, e il documento
             # esce comunque, vuoto invece che rotto.
             guasti = []
-            bocciati = agente.rileggi_documento(
-                _finta_mappa(testo, indirizzi)["rese"], chiavi_scelte, anagrafe,
-                errori=guasti)
+            with agente.usando(word_ai):
+                bocciati = agente.rileggi_documento(
+                    _finta_mappa(testo, indirizzi)["rese"], chiavi_scelte, anagrafe,
+                    errori=guasti)
+            if guasti and word_ai:
+                # Stessa riserva della decisione: rileggere col modello di
+                # sempre invece di sospendere tutte le assegnazioni.
+                guasti = []
+                bocciati = agente.rileggi_documento(
+                    _finta_mappa(testo, indirizzi)["rese"], chiavi_scelte, anagrafe,
+                    errori=guasti)
             for ancora in (bocciati or {}):
                 chiavi_scelte.pop(ancora, None)
             if guasti:

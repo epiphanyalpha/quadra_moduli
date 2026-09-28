@@ -51,6 +51,17 @@ services:
         value: deepseek-flash
       - key: QUADRA_CHIAVE
         sync: false            # si scrive nel pannello, mai nel repository
+      # Il modello dei Word, dal 28/09: Gemini 3.8 Flash via OpenRouter, meta'
+      # tempo di DeepSeek a parita' di errori sui 20 moduli di gara provati.
+      # DeepSeek qui sopra resta per i PDF e fa da riserva ai Word quando
+      # Gemini risponde illeggibile. Senza QUADRA_WORD_CHIAVE i Word tornano
+      # a DeepSeek da soli: e' anche il modo di tornare indietro.
+      - key: QUADRA_WORD_BASE_URL
+        value: https://openrouter.ai/api/v1
+      - key: QUADRA_WORD_MODELLO
+        value: google/gemini-3.8-flash
+      - key: QUADRA_WORD_CHIAVE
+        sync: false            # una chiave OpenRouter nuova, solo per questo servizio
       # Chi puo' entrare: "codice:Nome, codice:Nome". Senza questa, l'app
       # su un server si rifiuta di aprirsi - e' la protezione contro la
       # dimenticanza, non contro l'attacco.
