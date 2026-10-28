@@ -13,12 +13,41 @@ chiave e distinto dal saldo effettivo dell'account; verificato credito disponibi
 insufficiente per quelle chiamate. Il guasto non e un veto semantico del modello.
 Aggiunti dettaglio HTTP nel rapporto e avviso di compilazione incompleta/credito
 insufficiente nell'app. Nessun nuovo tentativo automatico per HTTP 402.
-Gemini resta la scelta del confronto, ma il collaudo online completo resta
-subordinato al ripristino del credito da parte del titolare dell'account.
+Il titolare ha ricaricato il credito. La prova successiva scrive 54 campi:
+nessun guasto HTTP o veto della rilettura; sei risposte della prima lettura
+fuori contratto e un fallimento di capienza. Individuata anche un'omissione
+nel precedente rilascio: la correzione del carattere minimo nelle righe era
+presente in locale ma mancava nella copia pubblicata. Allineata in `80f70d4`.
+Lo stesso rilascio aggiunge un solo tentativo di riparazione delle decisioni
+fuori contratto, limitato ai campi coinvolti e soggetto agli stessi controlli
+di provenienza. I dubbi legittimi non sono trasformati automaticamente in dati.
+Conservate nel rapporto scaricabile anche le risposte originali della lettura.
+94 test superati sia in locale sia sulla copia esatta pubblicata; confronto
+completo dei 49 file pubblici di esecuzione, tutti identici alla copia locale.
+Collaudo online del rilascio `80f70d4`, Render Live
+`dep-dbh186p5efls73b7hgng`: dichiarazioni **61/61 campi attesi**, verificati
+dal rapporto scaricato contro l'inventario precedente. Nessun campo atteso
+mancante, campo aggiunto fuori inventario, valore senza fonte, guasto del
+servizio, esclusione della rilettura o fallimento materiale. In questa nuova
+lettura tutte le risposte rispettano gia il contratto: il ripristino dei sei
+campi non dimostra l'attivazione del tentativo di riparazione, coperto dai test.
+Bozza finale scaricata e tutte le nove pagine renderizzate e ispezionate.
+L'istanza conferma **45/45 campi attesi** nella nuova compilazione online sulla
+stessa versione; anche qui nessuna omissione rispetto all'inventario, aggiunta
+fuori inventario, valore senza fonte, guasto o fallimento materiale. Le due
+differenze rispetto alla formulazione DeepSeek sono i comuni
+invece dello Stato nei campi generici residenza/sede, coerenti con le fonti.
+Scaricate e ispezionate anche le tre pagine dell'istanza: dodici pagine finali
+controllate in totale. L'avviso prudenziale sulla sezione OG6 resta visibile:
+verificata la classe nel campo della qualificazione, nessun dato scritto nello
+spazio dell'impresa ausiliaria. Scelte della pratica e sottoscrizione restano
+manuali. I conteggi misurano l'inventario anagrafico documentato di questi due
+moduli, non la compilazione automatica di tutte le caselle geometriche.
 
 ## Metodo
 
-Stessi due PDF originali e stessa anagrafica, codice del rilascio `38eaf9f`,
+Stessi due PDF originali e stessa anagrafica, codice locale della riforma di
+copertura (inclusa la correzione delle righe allineata pubblicamente in `80f70d4`),
 quattro processi indipendenti (due documenti per ciascun servizio), due prove
 complete per coppia modello/documento: otto compilazioni. Nessun riuso di piani
 o correzioni manuali. Inclusi controllo di pertinenza, prima lettura, revisione
