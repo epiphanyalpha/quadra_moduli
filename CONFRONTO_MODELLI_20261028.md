@@ -5,12 +5,16 @@ provati mantiene la copertura attesa e riduce i tempi, con un costo maggiore
 autorizzato dall'utente se il confronto risultava favorevole. Il modello dei
 Word resta Gemini; il motore di compilazione non cambia.
 
-**Prima verifica online dopo il cambio:** istanza 45 campi verificati;
-dichiarazioni soltanto 6, pur con 61 proposte iniziali. La traccia attribuisce
-55 sospensioni alla rilettura non disponibile su quattro pagine. Questo esito
-non convalida il cambio in produzione. Aggiunto dettaglio del guasto nel
-rapporto scaricabile e avviso esplicito di compilazione incompleta nell'app;
-segue diagnosi e nuova verifica prima della conferma definitiva del modello.
+**Verifica online dopo il cambio:** istanza 45 campi verificati; dichiarazioni
+soltanto 6, pur con 61 proposte iniziali, con 55 sospensioni della rilettura.
+Ripetuta la prova con diagnostica completa: 27 campi verificati, altre pagine
+sospese per **HTTP 402 Payment Required da OpenRouter**. Il limite residuo della
+chiave e distinto dal saldo effettivo dell'account; verificato credito disponibile
+insufficiente per quelle chiamate. Il guasto non e un veto semantico del modello.
+Aggiunti dettaglio HTTP nel rapporto e avviso di compilazione incompleta/credito
+insufficiente nell'app. Nessun nuovo tentativo automatico per HTTP 402.
+Gemini resta la scelta del confronto, ma il collaudo online completo resta
+subordinato al ripristino del credito da parte del titolare dell'account.
 
 ## Metodo
 

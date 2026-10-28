@@ -179,7 +179,7 @@ def _chiedi(messaggi: list, temperatura: float = 0.0, tetto: int = None) -> str:
             # su cento chiamate qualcuna cade: non deve buttare via la corsa
             ultimo = guaio
             status = getattr(getattr(guaio, 'response', None), 'status_code', None)
-            if tentativo == TENTATIVI_RETE - 1 or status in (400, 401, 403, 404):
+            if tentativo == TENTATIVI_RETE - 1 or status in (400, 401, 402, 403, 404):
                 raise
             _tempo.sleep(2 * (tentativo + 1))
     try:

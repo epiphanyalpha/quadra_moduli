@@ -223,7 +223,7 @@ def lavora(radice, pdf, fascicolo, cartella_lavoro, riusa=True,
             except (agente.RispostaModelloInvalida, RequestException) as exc:
                 status = getattr(getattr(exc, 'response', None), 'status_code', None)
                 diagnostica['errore'] = dict(tipo=type(exc).__name__, stato_http=status)
-                if attempt or status in (400, 401, 403, 404):
+                if attempt or status in (400, 401, 402, 403, 404):
                     raise
             except Exception as exc:
                 diagnostica['errore'] = dict(tipo=type(exc).__name__)
@@ -250,7 +250,9 @@ def lavora(radice, pdf, fascicolo, cartella_lavoro, riusa=True,
         traccia = traccia_pdf.costruisci(m, dict(diagnostica=dict(proposte=proposte)), decisions)
         salva_json(work/'traccia.json', traccia)
         codes = {g['stato_http'] for g in dettagli_guasti}
-        message = ('Il servizio AI non autorizza la richiesta: occorre verificare la credenziale configurata.'
+        message = ('Credito del servizio AI insufficiente: avvisa chi gestisce il servizio prima di riprovare.'
+                   if 402 in codes else
+                   'Il servizio AI non autorizza la richiesta: occorre verificare la credenziale configurata.'
                    if codes & {401, 403} else
                    'Il servizio di lettura non ha completato la richiesta. Riprova piu tardi.')
         yield dict(passo='rifiuto', testo=message+' Nessun dato e stato scritto.',

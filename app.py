@@ -509,7 +509,10 @@ with pagina_moduli:
         traccia = json.loads(rapporto.read_text(encoding='utf-8'))
         if traccia.get('guasti_rilettura'):
             pagine_guaste = ', '.join(str(g['pagina']) for g in traccia['guasti_rilettura'])
-            st.error('Compilazione incompleta: il controllo AI non e riuscito sulle pagine '
+            credito_insufficiente = any(g.get('stato_http')==402 for g in traccia['guasti_rilettura'])
+            st.error(('Credito del servizio AI insufficiente. Avvisa chi gestisce il servizio. '
+                      if credito_insufficiente else '')
+                     + 'Compilazione incompleta: il controllo AI non e riuscito sulle pagine '
                      + pagine_guaste + '. I relativi dati sono stati sospesi; riprova. '
                      'Il rapporto dei campi contiene il dettaglio del guasto.')
         with st.expander('Controlla le decisioni sui campi'):
