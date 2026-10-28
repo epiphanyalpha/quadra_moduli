@@ -503,6 +503,27 @@ with pagina_moduli:
     if st.session_state.rifiuto:
         st.error(st.session_state.rifiuto)
 
+    rapporto = (Path(st.session_state.artefatto)/'traccia.json'
+                if st.session_state.artefatto else None)
+    if rapporto and rapporto.is_file():
+        traccia = json.loads(rapporto.read_text(encoding='utf-8'))
+        with st.expander('Controlla le decisioni sui campi'):
+            st.caption('Per ciascuno spazio individuato: prima lettura, seconda lettura '
+                       'e risultato della scrittura. Gli spazi non individuati non compaiono qui.')
+            if traccia.get('proposta_storica'):
+                st.caption('Le proposte AI provengono dalla lavorazione precedente; '
+                           'questa esecuzione ha riapplicato il piano.')
+            st.dataframe([{
+                'Pagina': r['pagina'], 'Campo': r['etichetta'] or r['ancora'],
+                'Prima lettura': (r.get('proposta_iniziale') or {}).get('stato', 'Non registrata'),
+                'Seconda lettura': ('Superata dalla correzione' if
+                    r['decisione_prima_scrittura'].get('origine') == 'utente' else
+                    (r.get('rilettura') or {}).get('esito', 'Non richiesta')),
+                'Fase finale': r['fase'], 'Esito': r['esito'], 'Motivo': r['motivo'],
+            } for r in traccia['campi']], hide_index=True, use_container_width=True)
+            st.download_button('Scarica il rapporto dei campi', rapporto.read_bytes(),
+                               file_name='rapporto_campi.json', mime='application/json')
+
     # La domanda sulla pertinenza e' l'unica che ferma il lavoro, e finora non
     # si poteva rispondere: il motore la faceva, la pagina la mostrava, e li'
     # finiva. Chi conosce la gara sa la risposta meglio del modello, e deve
@@ -535,6 +556,12 @@ with pagina_moduli:
 
     verdetto = st.session_state.verdetto
     if verdetto:
+        if verdetto.get('allegati'):
+            st.info('%d valori lunghi sono riportati integralmente in allegato, '
+                    'con un richiamo nel campo del modulo.' % len(verdetto['allegati']))
+        for avviso in verdetto.get('avvisi_rilettura',[]):
+            st.warning('Da confermare sulla bozza, pagina %s: %s' %
+                       (avviso['pagina'],avviso['motivo']))
         st.divider()
         testa = {controllo.COMPLETO: st.success,
                  controllo.MANCANO_DATI: st.info,
@@ -588,7 +615,8 @@ with pagina_moduli:
                 if con_nome:
                     with st.expander("I %d campi che restano a te" % len(a_mano)):
                         st.dataframe(
-                            [{"pagina": p["pagina"], "campo": p["etichetta"]}
+                            [{"pagina": p["pagina"], "campo": p["etichetta"],
+                              "motivo": p.get('motivo', '')}
                              for p in con_nome],
                             use_container_width=True, hide_index=True)
                         if muti:

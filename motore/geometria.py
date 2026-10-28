@@ -237,10 +237,11 @@ def _celle(verticali, orizzontali, altezza_minima: float = 3.5,
     return celle
 
 
-def completa_griglie(verticali, orizzontali):
+def completa_griglie(verticali, orizzontali, righe=()):
     """Infer only outer edges supported by a repeated, connected table grid.
 
-    Three shared dividers and three crossbars must agree on their extent.
+    Repeated dividers/crossbars must agree on their extent; sparse grids also
+    require repeated labels in actual row bands (or a labelled short header).
     No internal divider is invented: merged cells and adjacent tables retain
     their real geometry. The inferred segments are evidence, not page ink.
     """
@@ -252,20 +253,42 @@ def completa_griglie(verticali, orizzontali):
         gruppi.setdefault(key, []).append(s)
     vs, hs, inferiti = list(verticali), list(orizzontali), []
     for (y0, y1), montanti in gruppi.items():
-        if len(raggruppa([s.posizione for s in montanti])) < 3:
-            continue
+        pochi_divisori = len(raggruppa([s.posizione for s in montanti])) < 3
         traverse = [s for s in orizzontali if y0-TOLLERANZA <= s.posizione <= y1+TOLLERANZA
                     and all(s.copre(v.posizione, v.posizione) for v in montanti)]
-        if len(raggruppa([s.posizione for s in traverse])) < 3:
+        minimo_traverse = 3
+        if not pochi_divisori and len(raggruppa([s.posizione for s in traverse])) == 2:
+            # Short open forms can have only two crossbars. Multiple dividers
+            # plus two actual labels in the header band supply the missing evidence.
+            first = min(s.posizione for s in traverse)
+            labels = [r for r in righe if y0 <= r.base <= first and r.testo.strip()
+                      and min(s.da for s in traverse) <= r.riquadro.x0 <= max(s.a for s in traverse)]
+            if len(labels) >= 2:
+                minimo_traverse = 2
+        if len(raggruppa([s.posizione for s in traverse])) < minimo_traverse:
             continue
         # A common outer span, rather than a single long page separator.
         spans = Counter((round(s.da, 1), round(s.a, 1)) for s in traverse)
         (x0, x1), count = spans.most_common(1)[0]
-        if count < 3 or count < len(traverse)*0.75:
+        if count < minimo_traverse or count < len(traverse)*0.75:
             continue
-        if not (x0 <= min(s.posizione for s in montanti) and
-                x1 >= max(s.posizione for s in montanti)):
+        if not (x0 <= min(s.posizione for s in montanti)+TOLLERANZA and
+                x1 >= max(s.posizione for s in montanti)-TOLLERANZA):
             continue
+        if pochi_divisori:
+            # A two-column open table needs textual evidence in repeated rows.
+            # This rejects page separators and empty ruling with a single crossing.
+            levels = sorted({y0,y1,*[s.posizione for s in traverse]})
+            interni = [s.posizione for s in montanti if x0+2*TOLLERANZA < s.posizione < x1-2*TOLLERANZA]
+            if not interni:
+                continue
+            divider = min(interni)
+            labelled = sum(any(x0 <= r.riquadro.x0 < divider and
+                              r.riquadro.x1 <= divider+max(1,r.dimensione) and a <= r.base <= b
+                              and any(c.isalnum() for c in r.testo)
+                              for r in righe) for a,b in zip(levels,levels[1:]))
+            if labelled < 3:
+                continue
         for asse, pos, start, end, lista in (
                 ('verticale', x0, y0, y1, vs), ('verticale', x1, y0, y1, vs),
                 ('orizzontale', y0, x0, x1, hs), ('orizzontale', y1, x0, x1, hs)):
@@ -279,8 +302,8 @@ def completa_griglie(verticali, orizzontali):
 def leggi(pagina: fitz.Page, numero: int) -> Pagina:
     """Misura una pagina gia' portata a rotazione 0."""
     verticali, orizzontali, rettangoli = _tracciati(pagina)
-    griglia_v, griglia_h, inferiti = completa_griglie(verticali, orizzontali)
     caratteri, righe = _testo(pagina)
+    griglia_v, griglia_h, inferiti = completa_griglie(verticali, orizzontali, righe)
     corpi = [round(c.dimensione, 1) for c in caratteri if c.testo.isalnum()]
     corpo = max(set(corpi), key=corpi.count) if corpi else 9.0
     p = Pagina(numero=numero, corpo=corpo, riquadro=fitz.Rect(pagina.rect),

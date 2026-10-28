@@ -129,7 +129,7 @@ class Riforma(unittest.TestCase):
 
     def test_verified_plan_reuses_bindings_only_for_unchanged_profile(self):
         source=self.source();profile={'profilo':{'nome':'Alfa'}}
-        def decide(text,addresses,*args):
+        def decide(text,addresses,*args,**kwargs):
             return {a:dict(stato='assegna',campo='nome',soggetto='Impresa',motivo='Etichetta') for a in addresses.values()}
         with patch.object(agente,'disponibile',return_value=True),patch.object(agente,'immagini',return_value=[]),patch.object(agente,'decidi_campi',side_effect=decide) as call,patch.object(agente,'rileggi_documento',return_value={}):
             a=list(lavorazione.lavora(self.root,source,profile,self.root/'runs',pertinenza_confermata=True))[-1]
@@ -195,7 +195,7 @@ class Riforma(unittest.TestCase):
         source=self.source();m=piano_pdf.mappe.costruisci(source)
         ids=[a['id'] for a in m['ancore']]
         profile={'profilo':{'nome':'Alfa','pec':'info@example.invalid'}}
-        plan=dict(versione=1,impronta=m['impronta'],fascicolo=lavori.impronta_dati(profile),
+        plan=dict(versione=piano_pdf.VERSIONE,impronta=m['impronta'],fascicolo=lavori.impronta_dati(profile),
                   mappa=piano_pdf._firma_mappa(m),decisioni={a:dict(stato='assegna',campo='nome',soggetto='Impresa',motivo='Test') for a in ids})
         a=piano_pdf.esegui(source,m,plan,profile,lavori.nuova_cartella(self.root/'runs'))
         b=piano_pdf.esegui(source,m,a['verdetto']['piano'],profile,lavori.nuova_cartella(self.root/'runs'),togli=[ids[0]])
@@ -220,7 +220,7 @@ class Riforma(unittest.TestCase):
     def test_user_exclusion_and_correction_persist_across_compilations(self):
         source=self.source();m=piano_pdf.mappe.costruisci(source)
         profile={'profilo':{'nome':'Alfa','altro':'Beta'}}
-        plan=dict(versione=1,impronta=m['impronta'],fascicolo=lavori.impronta_dati(profile),
+        plan=dict(versione=piano_pdf.VERSIONE,impronta=m['impronta'],fascicolo=lavori.impronta_dati(profile),
                   mappa=piano_pdf._firma_mappa(m),decisioni={a['id']:dict(stato='assegna',campo='nome',soggetto='Impresa',motivo='Test') for a in m['ancore']})
         aid=m['ancore'][0]['id']; other=m['ancore'][1]['id']
         plan['decisioni'][other]['campo']='altro'
@@ -236,7 +236,7 @@ class Riforma(unittest.TestCase):
             two=self.root/'two.pdf';doc.save(two)
         profile={'profilo':{'nome':'Alfa'}}
         calls=[]
-        def decide(text, addresses, *args):
+        def decide(text, addresses, *args, **kwargs):
             calls.append(1)
             if 'p2.' in next(iter(addresses.values())):raise Timeout()
             return {a:dict(stato='assegna',campo='nome',soggetto='Impresa',motivo='Test') for a in addresses.values()}
@@ -254,8 +254,8 @@ class Riforma(unittest.TestCase):
 
     def test_failed_user_correction_cannot_restore_previous_value(self):
         source=self.source();m=piano_pdf.mappe.costruisci(source)
-        profile={'profilo':{'nome':'Alfa','lungo':'W '*5000}}
-        plan=dict(versione=1,impronta=m['impronta'],fascicolo=lavori.impronta_dati(profile),
+        profile={'profilo':{'nome':'Alfa','lungo':'W'*5000}}
+        plan=dict(versione=piano_pdf.VERSIONE,impronta=m['impronta'],fascicolo=lavori.impronta_dati(profile),
                   mappa=piano_pdf._firma_mappa(m),decisioni={a['id']:dict(stato='assegna',campo='nome',soggetto='Impresa',motivo='Utente',origine='utente') for a in m['ancore']})
         aid=m['ancore'][0]['id']
         first=list(lavorazione.lavora(self.root,source,profile,self.root/'runs',piano_di_prima=plan))[-1]

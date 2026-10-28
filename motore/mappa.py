@@ -21,7 +21,7 @@ import fitz
 from riusare.strumenti_documento import Ancora, PagineDiritte, impronta, svuota_misure
 from motore import classificatore, geometria, resa
 
-VERSIONE = 2
+VERSIONE = 3
 
 
 def costruisci(percorso) -> dict:

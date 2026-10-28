@@ -128,7 +128,19 @@ def controlla(originale, bozza, mappa: dict, scritture: dict,
             esito = verifica(prima[ancora.pagina], dopo[ancora.pagina], ancora,
                              s.get("valore"), altrui)
             riga["motivo"] = esito.motivo
-            (verificate if esito.ok else non_segnalate).append(riga)
+            ok = esito.ok
+            if s.get('valore_completo'):
+                inizio, fine = s.get('pagina_allegato',0),s.get('pagina_allegato_fine',0)
+                allegato_ok = len(doc_prima)<inizio<=fine<=len(doc_dopo)
+                if allegato_ok:
+                    testo_allegato=' '.join(doc_dopo[i].get_text() for i in range(inizio-1,fine))
+                    normalizza=lambda t: re.sub(r'\s+',' ',t).strip()
+                    allegato_ok=normalizza(s['valore_completo']) in normalizza(testo_allegato)
+                ok = ok and allegato_ok
+                riga.update(valore_completo=s['valore_completo'],pagina_allegato=inizio)
+                riga['motivo'] = ('Riferimento e valore integrale in allegato verificati' if ok else
+                                  'Riferimento o contenuto dell’allegato non verificato')
+            (verificate if ok else non_segnalate).append(riga)
     doc_prima.close()
     doc_dopo.close()
 

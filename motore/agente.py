@@ -579,7 +579,7 @@ def rileggi_pagina(testo_compilato: str, indirizzi: dict, immagine=None) -> dict
     return bocciati
 
 
-def decidi_campi(testo, indirizzi, campi, chiavi, immagine=None):
+def decidi_campi(testo, indirizzi, campi, chiavi, immagine=None, diagnostica=None):
     """A complete, declarative inventory: the model never supplies Python."""
     istruzioni = '''Leggi un modulo e associa solo dati anagrafici del fascicolo.
 Per OGNI posto restituisci una voce JSON con posto, campo, stato, soggetto, motivo.
@@ -588,17 +588,43 @@ campo e una chiave ESATTA fra quelle disponibili, oppure stringa vuota.
 soggetto descrive chi deve fornire quel dato (impresa, firmatario, altra persona).
 Considera la sezione, la riga, la colonna e i soggetti: etichette uguali non
 implicano dati uguali. Ripeti un dato quando richiesto per lo stesso soggetto.
-Non compilare dati di altre persone con quelli del firmatario. Se il fascicolo
-contiene solo un aggregato, non inserirlo dove serve una sua parte. Non inventare
+Non compilare dati di altre persone con quelli del firmatario. Non inventare
 valori, chiavi, date o dichiarazioni. Caselle, firme e attestazioni restano manuali.
 Uno spazio geometrico puo essere impaginazione: usa non_campo quando non chiede dati.
 I bordi inferiti non provano che il campo sia pertinente. Usa l'immagine per
 verificare la relazione tra etichetta e spazio. Se non puoi stabilirla usa dubbio.
 Rispondi solo con una lista JSON, senza codice, una voce per ogni posto.
 '''
-    payload = dict(chiavi=list(chiavi), campi=campi, pagina=testo)
+    istruzioni += '''
+Ricevi anche i VALORI delle fonti: leggili, non decidere dai soli nomi delle chiavi.
+Compila ogni dato disponibile, anche contenuto in un testo aggregato.
+Per copiare un valore intero usa campo="chiave". Per estrarre o comporre usa
+campo="" e parti=[{"campo":"chiave","testo":"frammento ESATTO della fonte"}],
+separatore=" ". Ometti testo per copiare l'intera fonte. Separatori ammessi:
+spazio, virgola-spazio, punto e virgola-spazio, a capo, stringa vuota, spazio-trattino-spazio.
+Ogni frammento deve comparire letteralmente nella sua fonte; nessuna riscrittura,
+calcolo o deduzione. Si possono unire via e civico, isolare nome/cognome, luogo,
+data, ruolo e residenza di OGNI persona, o la classe di una categoria indicata
+nella fonte. Mantieni coerente l'identità della persona lungo una riga o blocco.
+Una tabella di soggetti comprende anche il firmatario se ricopre una delle cariche
+richieste. Usa l'ordine delle persone nella fonte; una persona distinta per riga.
+Le righe aggiuntive oltre le persone documentate restano vuote. Nei blocchi soci
+usa i soci documentati, senza dedurre il titolare effettivo dalle sole quote.
+I dati disponibili in un aggregato NON sono dato_assente: estrai le parti esatte.
+Se un'etichetta è generica (es. ATECO), non inventare il requisito di un valore singolo.
+Compila i campi dei requisiti documentati; non scegliere opzioni di partecipazione
+o dichiarazioni. Distingui dati dell'impresa da importi/riferimenti della gara.
+Una data stampata come __/__/____ è un solo posto per una data intera.
+'''
+    payload = dict(chiavi=list(chiavi), fonti=chiavi if isinstance(chiavi, dict) else {},
+                   campi=campi, pagina=testo)
+    if diagnostica is not None:
+        diagnostica['ingresso'] = dict(payload, immagine_presente=bool(immagine),
+                                     dati_anagrafici='fonti_con_valori')
     risposta = _chiedi([_messaggio(istruzioni + json.dumps(payload, ensure_ascii=False),
                                   [immagine] if immagine else ())])
+    if diagnostica is not None:
+        diagnostica['risposta_originale'] = risposta
     voci = _lista_risposta(risposta, 'campo')
     result, seen = {}, set()
     for voce in voci:
@@ -613,12 +639,23 @@ Rispondi solo con una lista JSON, senza codice, una voce per ogni posto.
         campo, stato = voce['campo'], voce.get('stato')
         soggetto = str(voce.get('soggetto') or '').strip()[:200]
         motivo = str(voce.get('motivo') or '').strip()[:500]
-        if stato not in {'assegna', 'dato_assente', 'dubbio', 'manuale', 'non_campo'} or (campo and campo not in chiavi) or (stato == 'assegna' and (not campo or not soggetto or not motivo)):
+        parti = voce.get('parti')
+        if stato not in {'assegna', 'dato_assente', 'dubbio', 'manuale', 'non_campo'} or (campo and campo not in chiavi) or (stato == 'assegna' and (not (campo or parti) or not soggetto or not motivo)):
             campo, stato, motivo = '', 'dubbio', 'Decisione incompleta o fuori contratto'
         result[aid] = dict(campo=campo, stato=stato, soggetto=soggetto, motivo=motivo)
+        if parti is not None:
+            result[aid].update(parti=parti, separatore=voce.get('separatore', ' '))
+        if stato == 'assegna' and isinstance(chiavi, dict):
+            from .valori import risolvi, ProiezioneInvalida
+            try:
+                risolvi(result[aid], chiavi)
+            except ProiezioneInvalida as exc:
+                result[aid].update(stato='dubbio', motivo=str(exc))
     for aid in indirizzi.values():
         result.setdefault(aid, dict(campo='', stato='dubbio', soggetto='',
                                    motivo='Il modello non ha restituito una decisione'))
+    if diagnostica is not None:
+        diagnostica['decisioni_validate'] = result
     return result
 
 
@@ -787,14 +824,91 @@ if __name__ == "__main__":
             print("  non sono riuscito a chiederglielo: %s" % guaio)
 
 
+def _rileggi_piano_pagina(pagina, piano, profilo, immagine, geometria=None, diagnostica=None):
+    from .valori import risolvi
+    geometria = geometria or {}
+    campi = [dict(posto=n, valore=risolvi(piano[a], profilo), decisione=piano[a],
+                  geometria=geometria.get(a,{}))
+             for n,a in pagina['indirizzi'].items() if a in piano and piano[a].get('stato')=='assegna'
+             and piano[a].get('origine')!='utente']
+    if not campi:
+        return {}, []
+    prompt = '''Controlla le associazioni proposte su un modulo, confrontando pagina e fonti.
+Le parti di testo sono già verificate come copie letterali delle fonti. Controlla
+che appartengano al soggetto richiesto e rispondano alla domanda del campo.
+Non devi giudicare completezza, scegliere dichiarazioni o imporre preferenze di formato.
+Un'etichetta generica non impone un solo elemento; un elenco pertinente non è un errore.
+Una parte documentata di un dato aggregato è utilizzabile. Non scartarla perché è estratta.
+Ritorna una lista JSON dei soli problemi con posto, esito, tipo, evidenza, perche.
+esito="errore" soltanto per una contraddizione concreta di soggetto, significato o fonte;
+tipo deve essere soggetto/significato/fonte; evidenza deve citare letteralmente
+il testo della pagina che dimostra la contraddizione. Un dubbio o problema di
+presentazione ha esito="dubbio" e viene mostrato per conferma senza cancellare il dato.
+Se tutto è sensato ritorna []. Nessun veto basato sulla sola cautela.
+Ogni posto ha coordinate rect ed etichetta: usa queste per identificare riga
+e colonna. La numerazione dei posti NON identifica il numero o l'ordine delle righe.
+Le celle vuote della colonna etichette non sono nuove righe di dati. Per un errore
+di significato cita l'etichetta effettiva di QUEL posto, non quella di un altro.
+'''
+    payload = dict(pagina=pagina['testo'], fonti=profilo, campi=campi)
+    risposta = _chiedi([_messaggio(prompt+json.dumps(payload,ensure_ascii=False), [immagine] if immagine else ())])
+    if diagnostica is not None:
+        diagnostica.update(campi=campi,risposta_originale=risposta)
+    esclusi, avvisi = {}, []
+    for v in _lista_risposta(risposta, 'perche'):
+        posto = str(v['posto'])
+        if posto not in pagina['indirizzi']:
+            raise RispostaModelloInvalida('Posto di rilettura sconosciuto')
+        aid = pagina['indirizzi'][posto]
+        if aid not in piano or piano[aid].get('stato')!='assegna':
+            continue
+        evidenza = v.get('evidenza')
+        label = geometria.get(aid,{}).get('etichetta','').strip()
+        significato_documentato = (v.get('tipo')!='significato' or
+            bool(label and isinstance(evidenza,str) and evidenza.casefold() in label.casefold()))
+        if (v.get('esito')=='errore' and v.get('tipo') in ('soggetto','significato','fonte')
+                and isinstance(evidenza,str) and len(evidenza.strip())>=2 and evidenza in pagina['testo']
+                and significato_documentato):
+            esclusi[aid] = v['perche'][:500]
+        else:
+            avvisi.append(dict(ancora=aid,pagina=pagina['pagina'],motivo=v['perche'][:500],
+                               esito='da_confermare'))
+    return esclusi, avvisi
+
+
 def rileggi_documento(rese, scelte: dict, anagrafe, immagini=None,
-                      paralleli: int = 4, errori=None) -> dict:
+                      paralleli: int = 4, errori=None, piano=None, avvisi=None, mappa=None, diagnostica=None) -> dict:
     """Rilegge tutte le pagine compilate e restituisce i valori da togliere.
 
     Gira **prima** di scrivere: un valore bocciato non deve arrivare sul foglio.
     Una casella vuota Bianca la riempie, un'assurdita' le fa buttare la bozza.
     """
     from concurrent.futures import ThreadPoolExecutor
+
+    if piano is not None:
+        bocciati = {}
+        geometria = {a['id']:a for a in (mappa or {}).get('ancore',[])}
+        dettagli = {p['pagina']:{} for p in rese}
+        with ThreadPoolExecutor(max_workers=max(1,paralleli)) as pool:
+            jobs = [(p,pool.submit(contextvars.copy_context().run,_rileggi_piano_pagina,p,piano,
+                                  anagrafe.fascicolo.get('profilo',{}),(immagini or {}).get(p['pagina']),
+                                  geometria,dettagli[p['pagina']]))
+                    for p in rese if any(a in scelte for a in p['indirizzi'].values())]
+            for p,job in jobs:
+                try:
+                    fatal, dubbi = job.result()
+                    bocciati.update(fatal)
+                    if avvisi is not None:
+                        avvisi.extend(dubbi)
+                except Exception as exc:
+                    if errori is None:
+                        raise
+                    errori.append(dict(fase='rilettura',pagina=p['pagina'],errore=type(exc).__name__))
+                    bocciati.update({a:'Rilettura non disponibile: assegnazione sospesa'
+                                     for a in p['indirizzi'].values() if a in scelte})
+        if diagnostica is not None:
+            diagnostica.update(dettagli)
+        return bocciati
 
     bocciati = {}
     if not rese or not scelte:

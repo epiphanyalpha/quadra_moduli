@@ -105,7 +105,9 @@ def _spazio_sopra(p: geometria.Pagina, x0: float, x1: float, base: float,
     return max(0.0, base - segno.y1)
 
 
-def _vuoto(p: geometria.Pagina, r: fitz.Rect, margine: float = 0.8) -> bool:
+def _vuoto(p: geometria.Pagina, r: fitz.Rect, margine: float = 1.2) -> bool:
+    if p.testo_in(r).strip():
+        return False
     dentro = fitz.Rect(r.x0 + margine, r.y0 + margine, r.x1 - margine, r.y1 - margine)
     if dentro.is_empty or dentro.width <= 0 or dentro.height <= 0:
         return False
@@ -410,6 +412,10 @@ def _riempimenti(p, presa):
             per_riga.append([c])
     for riga in per_riga:
         elenco = sorted(riga, key=lambda c: c.origine[0])
+        # A printed date mask is one field, including separators and short runs.
+        testo_riga = ''.join(c.testo for c in elenco)
+        date_masks = {m.start(): m.end() for m in re.finditer(
+            r'(?<![\w_])[_\.]{1,4}\s*/\s*[_\.]{1,4}\s*/\s*[_\.]{2,4}(?![\w_])', testo_riga)}
         i = 0
         while i < len(elenco):
             segno = elenco[i].testo
@@ -417,7 +423,10 @@ def _riempimenti(p, presa):
                 i += 1
                 continue
             j, k = i, i
-            while k + 1 < len(elenco):
+            data_fino = date_masks.get(i)
+            if data_fino:
+                j = k = data_fino-1
+            while not data_fino and k + 1 < len(elenco):
                 prossimo = elenco[k + 1].testo
                 if prossimo == segno:
                     precedente, attuale = elenco[j], elenco[k + 1]
@@ -429,8 +438,8 @@ def _riempimenti(p, presa):
                     k += 1
                 else:
                     break
-            corsa = [c for c in elenco[i:j + 1] if c.testo == segno]
-            if len(corsa) >= RUN_RIEMPIMENTO:
+            corsa = list(elenco[i:j+1]) if data_fino else [c for c in elenco[i:j + 1] if c.testo == segno]
+            if data_fino or len(corsa) >= RUN_RIEMPIMENTO:
                 r = fitz.Rect(corsa[0].riquadro.x0, min(c.riquadro.y0 for c in corsa),
                               corsa[-1].riquadro.x1, max(c.riquadro.y1 for c in corsa))
                 base = corsa[0].origine[1]
@@ -451,6 +460,7 @@ def _riempimenti(p, presa):
                         _id(p.numero, "riempimento", r.x0, base), "riempimento",
                         p.numero, tuple(scrivibile),
                         {"riempitivo": segno, "quanti": len(corsa),
+                         "formato_data": bool(data_fino),
                          "base": round(base, 2), "dimensione": round(dimensione, 2),
                          "alzata": round(alzata, 2)},
                         _a_sinistra(p, scrivibile, base) or _sopra(p, scrivibile),
@@ -532,10 +542,32 @@ def _aree(p, presa):
         sinistre = [c for c in p.celle if abs(c.riquadro.x1-r.x0) <= 1.5
                     and min(c.riquadro.y1, r.y1)-max(c.riquadro.y0, r.y0)
                     >= min(c.riquadro.height, r.height)*0.7]
-        etichetta = next((p.testo_in(c.riquadro) for c in sinistre
-                          if p.testo_in(c.riquadro)), '')
+        etichetta = next((p.testo_in(c.riquadro).strip() for c in sinistre
+                          if p.testo_in(c.riquadro).strip()), '')
+        colonna_con_titolo = any(c.riquadro.y1<=r.y0+1
+            and (c.riquadro & r).width >= r.width*.5
+            and r.x0 <= (c.riquadro.x0+c.riquadro.x1)/2 <= r.x1
+            and p.testo_in(c.riquadro).strip() for c in p.celle)
+        if not etichetta and not colonna_con_titolo:
+            # A repeated label/value form keeps its label column even on blank rows.
+            for sinistra in sinistre:
+                catena = sorted((c for c in p.celle if
+                    abs(c.riquadro.x0-sinistra.riquadro.x0)<1.5 and
+                    abs(c.riquadro.x1-sinistra.riquadro.x1)<1.5 and c.riquadro.y1<=r.y0+1),
+                    key=lambda c:-c.riquadro.y1)
+                limite = r.y0
+                for c in catena:
+                    if limite-c.riquadro.y1>max(4,p.corpo*.5):
+                        break
+                    etichetta = p.testo_in(c.riquadro).strip()
+                    if etichetta:
+                        break
+                    limite=c.riquadro.y0
+                if etichetta:
+                    break
         if not etichetta:
             vicine = [line for line in p.righe if line.riquadro.x1 <= r.x0+1
+                      and line.testo.strip()
                       and r.y0 <= line.base <= r.y1
                       and r.x0-line.riquadro.x1 <= max(r.width, 90)]
             if vicine:
@@ -547,8 +579,28 @@ def _aree(p, presa):
                  and b['da'] <= r.y0+1 and b['a'] >= r.y1-1) or
                 (b['asse'] == 'orizzontale' and min(abs(b['posizione']-r.y0), abs(b['posizione']-r.y1)) < 1.5
                  and b['da'] <= r.x0+1 and b['a'] >= r.x1-1) for b in p.bordi_inferiti)
+        # Follow the same column through adjacent empty rows to its header.
+        sopra = ''
+        limite = r.y0
+        for c in sorted((c for c in p.celle if abs(c.riquadro.x0-r.x0)<1.5
+                         and abs(c.riquadro.x1-r.x1)<1.5 and c.riquadro.y1<=r.y0+1),
+                        key=lambda c:-c.riquadro.y1):
+            if limite-c.riquadro.y1 > max(4, p.corpo*0.5):
+                break
+            sopra = p.testo_in(c.riquadro).strip()
+            if sopra:
+                break
+            limite = c.riquadro.y0
+        if not sopra:
+            intestazioni = [line for line in p.righe if line.testo.strip()
+                            and r.x0 <= (line.riquadro.x0+line.riquadro.x1)/2 <= r.x1
+                            and 0 < r.y0-line.base <= max(40,r.height*4)]
+            if intestazioni:
+                base_vicina = max(line.base for line in intestazioni)
+                sopra = ' '.join(line.testo.strip() for line in sorted(intestazioni,key=lambda x:x.base)
+                                 if base_vicina-line.base <= p.corpo*1.5)
         fuori.append(Ancora(_id(p.numero, "area", r.x0, r.y0), "area", p.numero, tuple(r),
-                            parametri, (etichetta or _a_sinistra(p, r) or _sopra(p, r))[:90],
+                            parametri, (etichetta or sopra or _a_sinistra(p, r) or _sopra(p, r))[:90],
                             _contesto(p, r)))
         presa.prendi(r)
         visti.append(fitz.Rect(r))
