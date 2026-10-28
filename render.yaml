@@ -42,20 +42,21 @@ services:
     region: frankfurt          # i dati sono di un'impresa italiana
     healthCheckPath: /_stcore/health
     envVars:
-      # Il modello. Una chiave sola, generata apposta per questo servizio:
+      # Modello comune per PDF e Word, dal confronto del 28/10/2026.
+      # Una chiave OpenRouter generata apposta per questo servizio:
       # cosi' si puo' revocare senza toccare il lavoro locale, e si vede
       # quanto consuma questa prova separata dal resto.
       - key: QUADRA_BASE_URL
-        value: https://api.deepseek.com/v1
+        value: https://openrouter.ai/api/v1
       - key: QUADRA_MODELLO
-        value: deepseek-flash
+        value: google/gemini-3.8-flash
+      - key: QUADRA_TETTO_GETTONI
+        value: "32768"         # limite compatibile con Gemini, verificato nel confronto
       - key: QUADRA_CHIAVE
         sync: false            # si scrive nel pannello, mai nel repository
-      # Il modello dei Word, dal 28/09: Gemini 3.8 Flash via OpenRouter, meta'
-      # tempo di DeepSeek a parita' di errori sui 20 moduli di gara provati.
-      # DeepSeek qui sopra resta per i PDF e fa da riserva ai Word quando
-      # Gemini risponde illeggibile. Senza QUADRA_WORD_CHIAVE i Word tornano
-      # a DeepSeek da soli: e' anche il modo di tornare indietro.
+      # Override Word mantenuto per compatibilita', ora uguale al modello
+      # comune. Entrambe le chiavi puntano alla stessa credenziale OpenRouter.
+      # Senza override Word si usa direttamente la configurazione comune.
       - key: QUADRA_WORD_BASE_URL
         value: https://openrouter.ai/api/v1
       - key: QUADRA_WORD_MODELLO
