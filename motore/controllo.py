@@ -64,6 +64,7 @@ def _punti_aperti(mappa: dict, note: dict, scritte: set) -> list:
     il modulo non le chiede: se non c'e' l'ancora, non c'e' il punto aperto.
     """
     ancore = {a["id"]: a for a in mappa["ancore"]}
+    esclusi = set(note.get('non_applicabili', []))
     aperti, rifiutati = [], []
     for punto in note.get("punti_aperti", []):
         identificativo = punto.get("ancora")
@@ -83,7 +84,7 @@ def _punti_aperti(mappa: dict, note: dict, scritte: set) -> list:
     aperti.sort(key=lambda p: (p["pagina"], p["ancora"]))
     noti = {p['ancora'] for p in aperti}
     for identificativo, a in ancore.items():
-        if identificativo not in scritte and identificativo not in noti:
+        if identificativo not in scritte and identificativo not in noti and identificativo not in esclusi:
             aperti.append(dict(ancora=identificativo, pagina=a['pagina']+1,
                                etichetta=a.get('etichetta', ''), tipo=a['tipo'], chiave='',
                                motivo='Campo rilevato senza scrittura: da verificare manualmente'))
@@ -173,7 +174,7 @@ def controlla(originale, bozza, mappa: dict, scritture: dict,
 # l'anagrafica, e va detto quello che si e' fatto, non quello che resta.
 FRASI = {
     COMPLETO: "Scritture verificate nei campi rilevati. Controlla la bozza prima di consegnarla.",
-    MANCANO_DATI: "Anagrafica scritta. Gli altri %d campi del modulo li compili tu.",
+    MANCANO_DATI: "Bozza parziale: %d spazi rilevati restano da valutare.",
     NON_RIUSCITO: "Documento compilato, ma il programma non e' riuscito su %d punti.",
     ERRORI_NON_SEGNALATI: "Attenzione: %d scritture non risultano nel documento.",
 }
@@ -193,8 +194,13 @@ def racconta(esito: dict) -> str:
     righe = [titolo, ""]
     if not esito['verificate']:
         righe[0] = 'Nessun dato scritto: il modulo non risulta compilato.'
-    righe.append("%d campi scritti e verificati su %d campi del modulo."
+    righe.append("%d scritture verificate materialmente su %d spazi rilevati."
                  % (len(esito["verificate"]), esito["campi_totali"]))
+    if 'domande_campi' in esito:
+        righe.append('%d campi si possono risolvere in «Completiamo il modulo».' % len(esito['domande_campi']))
+        righe.append('La verifica materiale non certifica il significato o la completezza del modulo.')
+    if esito.get('scritture_escluse'):
+        righe.append('%d scritture fallite sono state rimosse e richiedono una correzione.' % len(esito['scritture_escluse']))
     for titoletto, chiave in (("Non risultano nel documento", "non_segnalate"),
                               ("Il programma non ce l'ha fatta", "non_riuscite")):
         if esito[chiave]:
@@ -212,7 +218,7 @@ def racconta(esito: dict) -> str:
     muti = len(esito["punti_aperti"]) - len(con_nome)
     if con_nome:
         righe.append("")
-        righe.append("Il resto del modulo lo compili tu, guardando la bozza:")
+        righe.append("Spazi ancora da valutare sulla bozza:")
         # Il motivo e' quasi sempre lo stesso ripetuto: stamparlo accanto a
         # ognuno riempie pagine e nasconde l'unica cosa che serve, cioe' QUALI
         # campi sono. Su un modulo di quattro pagine erano 48 righe identiche.

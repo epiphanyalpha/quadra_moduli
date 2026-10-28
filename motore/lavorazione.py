@@ -106,10 +106,10 @@ def artefatto_esistente(radice: Path, mappa: dict):
 
 
 def lavora(radice: Path, pdf, fascicolo: dict, cartella_lavoro: Path,
-           riusa=True, pertinenza_confermata=False, piano_di_prima=None, togli=()):
+           riusa=True, pertinenza_confermata=False, piano_di_prima=None, togli=(), contesto=None):
     from .piano_pdf import lavora as dichiarativa
     yield from dichiarativa(radice, pdf, fascicolo, cartella_lavoro, riusa,
-                            pertinenza_confermata, piano_di_prima, togli)
+                            pertinenza_confermata, piano_di_prima, togli, contesto)
 
 
 def lavora_legacy(radice: Path, pdf, fascicolo: dict, cartella_lavoro: Path,

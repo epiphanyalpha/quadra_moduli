@@ -81,8 +81,9 @@ class TracciaPDF(unittest.TestCase):
     def test_failed_appendix_evidence_survives_regeneration(self):
         ids=[]
         def decide(text,addresses,*args,**kwargs):
-            ids.extend(addresses.values())
-            return {a:self.assigned('lungo' if i==0 else 'nome') for i,a in enumerate(ids)}
+            if not ids:
+                ids.extend(addresses.values())
+            return {a:self.assigned('lungo' if a==ids[0] else 'nome') for a in addresses.values()}
         result=self.run_pipeline(decide)
         v=result['verdetto'];t=v['traccia_campi']
         failed=next(r for r in t['campi'] if r['ancora']==ids[0])
@@ -91,6 +92,10 @@ class TracciaPDF(unittest.TestCase):
         self.assertEqual(failed['proposta_iniziale']['stato'],'assegna')
         self.assertIn(ids[0],v['scritture_escluse'])
         self.assertNotIn(ids[0],[r['ancora'] for r in v['verificate']])
+        self.assertEqual(t['riparazione_scrittura']['campi'], [ids[0]])
+        self.assertEqual(len(t['riparazione_scrittura']['pagine']), 1)
+        original = next(r for r in t['riparazione_scrittura']['prima_scrittura']['campi'] if r['ancora']==ids[0])
+        self.assertEqual(original['esito'], 'verifica_fallita')
         folder=Path(result['artefatto'])
         self.assertEqual(json.loads((folder/'traccia.json').read_text(encoding='utf-8')),t)
         self.assertTrue((folder/'verifica_primo_tentativo.json').is_file())

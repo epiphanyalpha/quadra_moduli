@@ -582,7 +582,7 @@ def rileggi_pagina(testo_compilato: str, indirizzi: dict, immagine=None) -> dict
 def decidi_campi(testo, indirizzi, campi, chiavi, immagine=None, diagnostica=None,
                  _ripara=True, _errori=None):
     """A complete, declarative inventory: the model never supplies Python."""
-    istruzioni = '''Leggi un modulo e associa solo dati anagrafici del fascicolo.
+    istruzioni = '''Leggi un modulo e associa i dati documentati del fascicolo.
 Per OGNI posto restituisci una voce JSON con posto, campo, stato, soggetto, motivo.
 stato deve essere: assegna, dato_assente, dubbio, manuale, non_campo.
 campo e una chiave ESATTA fra quelle disponibili, oppure stringa vuota.
@@ -590,7 +590,17 @@ soggetto descrive chi deve fornire quel dato (impresa, firmatario, altra persona
 Considera la sezione, la riga, la colonna e i soggetti: etichette uguali non
 implicano dati uguali. Ripeti un dato quando richiesto per lo stesso soggetto.
 Non compilare dati di altre persone con quelli del firmatario. Non inventare
-valori, chiavi, date o dichiarazioni. Caselle, firme e attestazioni restano manuali.
+valori, chiavi, date o dichiarazioni. Le firme restano manuali.
+Le fonti senza prefisso riguardano l'impresa; quelle lavoro_corrente.* o scenari.*
+appartengono alla SOLA pratica scelta esplicitamente dall'utente per questo documento.
+Leggi le fonti di ruolo: l'impresa puo essere esecutrice e il richiedente un
+committente diverso. Non riempire due ruoli diversi con l'impresa per comodita.
+Se il soggetto richiesto non e documentato, usa dubbio e formula la domanda nel motivo.
+Per una casella puoi proporre una fonte booleana con campo, oppure confronto=
+{"campo":"chiave","uguale_a":"valore INTERO esatto della fonte"} per confrontare
+un dato documentato con l'opzione stampata. Il programma chiedera conferma
+all'utente prima di applicare OGNI scelta. Non dedurre dichiarazioni legali
+o condizioni di partecipazione da dati che non le attestano; usa manuale.
 Uno spazio geometrico puo essere impaginazione: usa non_campo quando non chiede dati.
 I bordi inferiti non provano che il campo sia pertinente. Usa l'immagine per
 verificare la relazione tra etichetta e spazio. Se non puoi stabilirla usa dubbio.
@@ -614,13 +624,18 @@ usa i soci documentati, senza dedurre il titolare effettivo dalle sole quote.
 I dati disponibili in un aggregato NON sono dato_assente: estrai le parti esatte.
 Se un'etichetta è generica (es. ATECO), non inventare il requisito di un valore singolo.
 Compila i campi dei requisiti documentati; non scegliere opzioni di partecipazione
-o dichiarazioni. Distingui dati dell'impresa da importi/riferimenti della gara.
+o dichiarazioni non documentate. Distingui dati dell'impresa da importi/riferimenti della gara.
 Una data stampata come __/__/____ è un solo posto per una data intera.
 '''
     payload = dict(chiavi=list(chiavi), fonti=chiavi if isinstance(chiavi, dict) else {},
                    campi=campi, pagina=testo)
     if _errori:
         payload['errori_contratto_da_correggere'] = _errori
+        istruzioni += '''\nCorreggi soltanto i posti elencati. Ricevi le decisioni precedenti e gli errori.
+Se una scrittura non entra, verifica che il dato scelto sia proprio quello chiesto:
+puoi estrarre dalle fonti la parte pertinente, senza abbreviare, inventare o
+troncare il dato per farlo entrare. Se non e possibile, lascia dubbio o manuale.
+Non cambiare associazioni fuori dall'elenco.\n'''
     if diagnostica is not None:
         diagnostica['ingresso'] = dict(payload, immagine_presente=bool(immagine),
                                      dati_anagrafici='fonti_con_valori')
@@ -645,13 +660,16 @@ Una data stampata come __/__/____ è un solo posto per una data intera.
         soggetto = str(voce.get('soggetto') or '').strip()[:200]
         motivo = str(voce.get('motivo') or '').strip()[:500]
         parti = voce.get('parti')
-        if stato not in {'assegna', 'dato_assente', 'dubbio', 'manuale', 'non_campo'} or (campo and campo not in chiavi) or (stato == 'assegna' and (not (campo or parti) or not soggetto or not motivo)):
+        confronto = voce.get('confronto')
+        if stato not in {'assegna', 'dato_assente', 'dubbio', 'manuale', 'non_campo'} or (campo and campo not in chiavi) or (stato == 'assegna' and (not (campo or parti or confronto) or not soggetto or not motivo)):
             campo, stato, motivo = '', 'dubbio', 'Decisione incompleta o fuori contratto'
             da_riparare.add(aid)
             errori_contratto.append(dict(posto=posto,motivo=motivo,voce=voce))
         result[aid] = dict(campo=campo, stato=stato, soggetto=soggetto, motivo=motivo)
         if parti is not None:
             result[aid].update(parti=parti, separatore=voce.get('separatore', ' '))
+        if confronto is not None:
+            result[aid]['confronto'] = confronto
         if stato == 'assegna' and isinstance(chiavi, dict):
             from .valori import risolvi, ProiezioneInvalida
             try:

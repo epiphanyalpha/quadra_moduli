@@ -481,6 +481,13 @@ def _tratti(p, presa):
     for s in p.orizzontali:
         if s.lunghezza < 24:
             continue
+        # A measured table edge is not a separate writing line, including
+        # borders reconstructed from dots with rows taller than 22 points.
+        if any((abs(c.riquadro.y0-s.posizione) <= geometria.TOLLERANZA or
+                abs(c.riquadro.y1-s.posizione) <= geometria.TOLLERANZA) and
+               min(c.riquadro.x1,s.a)-max(c.riquadro.x0,s.da) > s.lunghezza*0.8
+               for c in p.celle):
+            continue
         r = fitz.Rect(s.da, s.posizione - 1.0, s.a, s.posizione + 1.0)
         vicina = any(abs(altra.posizione - s.posizione) <= 22
                      and altra is not s

@@ -1,7 +1,6 @@
 """PDF compilation as validated data bindings, independent of generated code."""
 import copy
 import json
-import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -11,13 +10,23 @@ from . import agente, controllo, mappa as mappe, soggetti, traccia_pdf
 from .anagrafe import Anagrafe
 from .lavori import impronta_dati, nuova_cartella, salva_json
 from .valori import risolvi, ProiezioneInvalida
+from .fonti_pdf import fonti
+from . import revisione_pdf
 from riusare.strumenti_documento import Ancora, PagineDiritte, firmato, scrivi, impronta
 
-VERSIONE = 2
+VERSIONE = 3
 
 
 def _firma_mappa(mappa):
     return impronta_dati(mappa['ancore'])
+
+
+def _senza_guasti(piano):
+    diagnostica = piano.get('diagnostica', {})
+    return (not diagnostica.get('guasti_rilettura') and
+            not any(d.get('scrittura_fallita') for d in piano.get('decisioni',{}).values()) and
+            not any(p.get('errore') or p.get('guasti') for p in
+                    (diagnostica.get('riparazione_scrittura') or {}).get('pagine', [])))
 
 
 def _scrivi(originale, mappa, valori, cartella):
@@ -32,7 +41,7 @@ def _scrivi(originale, mappa, valori, cartella):
                 esito = scrivi(diritto[a.pagina], a, valori[aid])
                 row = dict(ancora=aid, tipo=a.tipo, etichetta=a.etichetta,
                            valore=valori[aid], scritto=bool(esito.ok), motivo=esito.motivo)
-                if (not esito.ok and 'non entra' in esito.motivo and a.tipo=='area'
+                if (not esito.ok and 'non entra' in esito.motivo and a.tipo in ('area', 'tratto', 'riempimento')
                         and not a.parametri.get('formato_data')):
                     numero = 1+sum('valore_completo' in r for r in rows)
                     riferimento = 'Vedi allegato %d' % numero
@@ -80,6 +89,8 @@ def esegui(originale, mappa, piano, fascicolo, cartella, togli=(), origine='pian
         raise ValueError('Il modulo o il fascicolo sono cambiati: occorre una nuova verifica.')
     decisions = copy.deepcopy(piano['decisioni'])
     profilo = fascicolo.get('profilo', {})
+    catalogo = fonti(fascicolo, piano.get('contesto'))
+    revisione_pdf.richiedi_conferme(mappa, decisions, piano.get('contesto'))
     esclusi = set(togli)
     valori = {}
     by_id = {a['id']: a for a in mappa['ancore']}
@@ -87,19 +98,21 @@ def esegui(originale, mappa, piano, fascicolo, cartella, togli=(), origine='pian
         if aid not in by_id:
             raise ValueError('Piano con un campo sconosciuto')
         if aid in esclusi:
+            d.pop('scrittura_fallita', None)
             d.update(stato='manuale', motivo='Rimosso dall’utente', origine='utente')
         campo = d.get('campo')
         a = by_id[aid]
-        if (d.get('stato') == 'assegna' and a['tipo'] != 'casella'
-                and (a['tipo'] != 'widget' or a.get('parametri', {}).get('genere') == 'Text')
-                ):
+        if d.get('stato') == 'assegna':
             try:
-                valori[aid] = risolvi(d, profilo)
+                if revisione_pdf.selezione(a) and d.get('origine') != 'utente':
+                    d.update(stato='da_confermare', motivo='Conferma la scelta prima di inserirla')
+                    continue
+                valori[aid] = revisione_pdf.valore(d, catalogo, a)
             except ProiezioneInvalida as exc:
                 d.update(stato='dubbio', motivo=str(exc))
-    note = {'punti_aperti': []}
+    note = {'punti_aperti': [], 'non_applicabili': [a for a,d in decisions.items() if d.get('stato')=='non_campo']}
     for aid, a in by_id.items():
-        if aid not in valori:
+        if aid not in valori and aid not in note['non_applicabili']:
             d = decisions.get(aid, {})
             campo = d.get('campo', '')
             note['punti_aperti'].append(dict(ancora=aid,
@@ -118,11 +131,17 @@ def esegui(originale, mappa, piano, fascicolo, cartella, togli=(), origine='pian
     if failed:
         for aid in failed:
             valori.pop(aid, None)
-            decisions[aid].update(stato='manuale', motivo='Scrittura non verificata: lasciato vuoto')
+            problema = next(r.get('motivo','') for r in traccia['campi'] if r['ancora']==aid)
+            decisions[aid].update(stato='manuale', scrittura_fallita=True,
+                motivo='Scrittura non verificata, cambia il dato o completa a mano: '+problema)
             note['punti_aperti'].append(dict(ancora=aid, chiave='', motivo=decisions[aid]['motivo']))
         bozza, writes = _scrivi(originale, mappa, valori, cartella)
         verdict = controllo.controlla(originale, bozza, mappa, writes, note)
     verdict['piano'] = dict(piano, decisioni=decisions)
+    verdict['domande_campi'] = revisione_pdf.domande(mappa, verdict['piano'], catalogo)
+    verdict['contesto'] = piano.get('contesto')
+    verdict['riepilogo_decisioni'] = {s:sum(d.get('stato') == s for d in decisions.values())
+        for s in ('assegna', 'da_confermare', 'dubbio', 'dato_assente', 'manuale', 'non_campo')}
     verdict['decisioni_campi'] = decisions
     verdict['scritture_escluse'] = sorted(failed)
     verdict['soggetti_da_controllare'] = soggetti.avvertimenti(mappa, valori)
@@ -140,13 +159,70 @@ def esegui(originale, mappa, piano, fascicolo, cartella, togli=(), origine='pian
                 testo=controllo.racconta(verdict))
 
 
+def _ripara_scritture(pdf, mappa, piano, evento, fascicolo, catalogo, images, cartella_lavoro):
+    """One bounded repair round, at most three pages, never on user answers.
+
+    Preserve every successful binding and the first physical failure evidence.
+    The model may only propose new source bindings for failed slots; the usual
+    source, semantic and material checks still apply.
+    """
+    failed = set(evento['verdetto']['scritture_escluse'])
+    eligible = {a for a in failed if piano['decisioni'].get(a,{}).get('origine') != 'utente'}
+    if not eligible:
+        return evento
+    plan = copy.deepcopy(evento['verdetto']['piano'])
+    report = dict(campi=sorted(eligible), tentativi_massimi=1, pagine_massime=3,
+                  prima_scrittura=evento['verdetto']['traccia_campi'], pagine=[])
+    by_id = {a['id']:a for a in mappa['ancore']}
+    for page in [p for p in mappa['rese'] if eligible.intersection(p['indirizzi'].values())][:3]:
+        addresses = {n:a for n,a in page['indirizzi'].items() if a in eligible}
+        fields = [dict(posto=n, **{k:by_id[a].get(k) for k in
+                    ('etichetta','tipo','rect','contesto','parametri')}) for n,a in addresses.items()]
+        errors = [dict(posto=n, decisione=piano['decisioni'][a],
+            motivo=next(r['motivo'] for r in report['prima_scrittura']['campi'] if r['ancora']==a))
+            for n,a in addresses.items()]
+        diagnostic = dict(pagina=page['pagina'])
+        report['pagine'].append(diagnostic)
+        try:
+            proposals = agente.decidi_campi(page['testo'], addresses, fields, catalogo,
+                images.get(page['pagina']), diagnostica=diagnostic, _ripara=False, _errori=errors)
+            proposals = {a:d for a,d in proposals.items() if a in addresses.values()}
+            errors_review, warnings = [], []
+            review = agente.rileggi_documento([page],
+                {a:d.get('campo','') for a,d in proposals.items() if d.get('stato')=='assegna'},
+                Anagrafe({'profilo':catalogo}), images, piano=proposals, mappa=mappa,
+                errori=errors_review, avvisi=warnings)
+            diagnostic.update(escluse=review, guasti=errors_review, avvisi=warnings)
+            for a,d in proposals.items():
+                if a in review:
+                    d.update(stato='dubbio',motivo=review[a])
+                for warning in warnings:
+                    if warning['ancora']==a and d.get('stato')=='assegna':
+                        d.update(stato='da_confermare',motivo=warning['motivo'])
+                plan['decisioni'][a] = d
+        except (agente.RispostaModelloInvalida, RequestException) as exc:
+            diagnostic['errore'] = dict(tipo=type(exc).__name__,
+                stato_http=getattr(getattr(exc,'response',None),'status_code',None))
+            # Keep the previous clean draft and its open question if repair failed.
+            for a in addresses.values():
+                plan['decisioni'][a] = evento['verdetto']['piano']['decisioni'][a]
+            if diagnostic['errore']['stato_http'] in (400,401,402,403,404):
+                break
+    revisione_pdf.richiedi_conferme(mappa, plan['decisioni'], plan.get('contesto'), ambito=eligible)
+    plan.setdefault('diagnostica', {})['riparazione_scrittura'] = report
+    return esegui(pdf, mappa, plan, fascicolo, nuova_cartella(cartella_lavoro), origine='riparazione_scrittura')
+
+
 def lavora(radice, pdf, fascicolo, cartella_lavoro, riusa=True,
-           pertinenza_confermata=False, piano_di_prima=None, togli=()):
+           pertinenza_confermata=False, piano_di_prima=None, togli=(), contesto=None):
     pdf = Path(pdf)
     if firmato(pdf):
         yield dict(passo='rifiuto', testo='Il PDF e gia firmato: usa il modulo originale non firmato.')
         return
     work = nuova_cartella(cartella_lavoro)
+    if piano_di_prima is not None:
+        contesto = piano_di_prima.get('contesto')
+    catalogo = fonti(fascicolo, contesto)
     yield dict(passo='misura', testo='Leggo testo, tabelle e spazi del modulo.')
     m = mappe.costruisci(pdf)
     yield dict(passo='mappa', mappa=m, testo=f"{len(m['ancore'])} spazi individuati: verifico il significato di ciascuno.")
@@ -155,6 +231,8 @@ def lavora(radice, pdf, fascicolo, cartella_lavoro, riusa=True,
         return
     identity = dict(versione=VERSIONE, impronta=m['impronta'],
                     fascicolo=impronta_dati(fascicolo), mappa=_firma_mappa(m))
+    if contesto is not None:
+        identity['contesto'] = contesto
     cache = Path(cartella_lavoro)/'piani'/ (impronta_dati(identity)+'.json')
     override_file = cache.with_suffix('.utente.json')
     overrides = {}
@@ -185,7 +263,8 @@ def lavora(radice, pdf, fascicolo, cartella_lavoro, riusa=True,
             salva_json(override_file, dict(identity, decisioni={a:d for a,d in decisions.items()
                                                               if d.get('origine') == 'utente'}))
             if (not event['verdetto']['scritture_escluse'] and not event['verdetto']['non_segnalate']
-                    and not any(d.get('stato') == 'dubbio' for d in decisions.values())):
+                    and not any(d.get('stato') == 'dubbio' for d in decisions.values())
+                    and _senza_guasti(event['verdetto']['piano'])):
                 salva_json(cache, event['verdetto']['piano'])
             else:
                 cache.unlink(missing_ok=True)
@@ -210,16 +289,11 @@ def lavora(radice, pdf, fascicolo, cartella_lavoro, riusa=True,
         for f in fields:
             a = next(a for a in m['ancore'] if a['id']==page['indirizzi'][f['posto']])
             f['parametri'] = a.get('parametri',{})
-        if fields and all(f['tipo'] == 'casella' for f in fields):
-            return {aid: dict(stato='manuale', campo='', soggetto='',
-                             origine='regola',
-                             motivo='Scelta o dichiarazione da confermare manualmente')
-                    for aid in page['indirizzi'].values()}
         for attempt in range(2):
             diagnostica = dict(pagina=page['pagina'], tentativo=attempt+1)
             try:
                 return agente.decidi_campi(page['testo'], page['indirizzi'], fields,
-                                           fascicolo.get('profilo', {}), images.get(page['pagina']),
+                                           catalogo, images.get(page['pagina']),
                                            diagnostica=diagnostica)
             except (agente.RispostaModelloInvalida, RequestException) as exc:
                 status = getattr(getattr(exc, 'response', None), 'status_code', None)
@@ -266,26 +340,34 @@ def lavora(radice, pdf, fascicolo, cartella_lavoro, riusa=True,
     yield dict(passo='correzione', testo='Rileggo le associazioni prima di scrivere i dati.')
     errors, warnings, review_details = [], [], {}
     review = {a:c for a,c in choices.items() if decisions[a].get('origine') != 'utente'}
-    rejected = agente.rileggi_documento(m['rese'], review, Anagrafe(fascicolo), images,
+    rejected = agente.rileggi_documento(m['rese'], review, Anagrafe({'profilo':catalogo}), images,
                                        errori=errors, piano=decisions, avvisi=warnings,
                                        mappa=m, diagnostica=review_details)
     salva_json(work/'rilettura.json', dict(assegnazioni_esaminate=review, escluse=rejected,
                                         errori=errors,avvisi=warnings,pagine=review_details))
     for aid, reason in rejected.items():
         decisions[aid].update(stato='dubbio', motivo=reason)
+    # Doubts, choices, role risks and practice bindings become answerable questions.
+    revisione_pdf.richiedi_conferme(m, decisions, contesto, warnings)
     piano = dict(identity, decisioni=decisions,
                  diagnostica=dict(proposte=proposte, rilettura=rejected, avvisi=warnings,
                                   letture_originali=letture_originali,
                                   guasti_rilettura=errors, pagine_rilettura=review_details))
     yield dict(passo='scrittura', testo='Scrivo soltanto i dati con associazioni verificate.')
     event = esegui(pdf, m, piano, fascicolo, work, togli, origine='nuova_lettura')
+    if event['verdetto']['scritture_escluse']:
+        yield dict(passo='correzione', testo='Correggo una volta i soli campi con scrittura fallita, conservando quelli riusciti.')
+        event = _ripara_scritture(pdf, m, piano, event, fascicolo, catalogo, images, cartella_lavoro)
+        piano = event['verdetto']['piano']
+        decisions = piano['decisioni']
     # Cache only a completely processed decision/review, never a failed attempt.
     if (not guasti and not errors and event['verdetto']['verificate']
             and not any(d.get('stato') == 'dubbio' for d in decisions.values())
+            and _senza_guasti(piano)
             and not event['verdetto']['non_segnalate'] and not event['verdetto']['scritture_escluse']):
         salva_json(cache, piano)
     event['verdetto']['guasti_lettura'] = guasti
     event['verdetto']['guasti_rilettura'] = errors
     event['verdetto']['dettaglio_guasti_lettura'] = dettagli_guasti
-    salva_json(work/'verdetto.json', event['verdetto'])
+    salva_json(Path(event['artefatto'])/'verdetto.json', event['verdetto'])
     yield event

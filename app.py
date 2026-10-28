@@ -31,7 +31,7 @@ import streamlit as st
 import esecuzione
 from motore import (accesso, agente, compilatore, controllo, fascicoli,
                     lavorazione, lavorazione_word, scheda, soggetti, word)
-from motore import lavori
+from motore import lavori, fonti_pdf, revisione_pdf
 
 RADICE = Path(__file__).resolve().parent
 
@@ -447,6 +447,19 @@ pagina_moduli, pagina_word, pagina_anagrafica = st.tabs(
 with pagina_moduli:
     st.title("Compila un modulo")
     caricato = st.file_uploader("Trascina qui il PDF del modulo", type="pdf")
+    contesto_pdf = None
+    contesti_pdf = fonti_pdf.contesti(fascicolo)
+    if caricato is not None and contesti_pdf:
+        import hashlib
+        chiave_documento = hashlib.sha256(caricato.getbuffer()).hexdigest()[:16]
+        contesto_pdf = st.selectbox('Quali dati usare per questo modulo?', [None]+list(contesti_pdf),
+            key='pdf_contesto_'+chiave_documento,
+            format_func=lambda k: 'Solo anagrafica dell’impresa' if k is None else contesti_pdf[k])
+        if contesto_pdf:
+            with st.expander('Controlla i dati della pratica scelta', expanded=True):
+                fonti_pratica = fonti_pdf.fonti(fascicolo, contesto_pdf)
+                st.json({k:v for k,v in fonti_pratica.items() if k.startswith(contesto_pdf+'.')})
+            st.caption('Premendo Compila confermi che questa pratica riguarda il modulo caricato.')
 
     def _compila(modulo: Path, confermata: bool = False, piano=None, togli=()):
         st.session_state.passi, st.session_state.verdetto = [], None
@@ -458,7 +471,7 @@ with pagina_moduli:
         try:
             for passo in lavorazione.lavora(RADICE, modulo, fascicolo, LAVORO,
                                             pertinenza_confermata=confermata,
-                                            piano_di_prima=piano, togli=togli):
+                                            piano_di_prima=piano, togli=togli, contesto=contesto_pdf):
                 st.session_state.passi.append(passo)
                 _, arrivato = lavorazione.fase(passo)
                 if arrivato:
@@ -564,12 +577,13 @@ with pagina_moduli:
 
     verdetto = st.session_state.verdetto
     if verdetto:
+        contesto_usato = verdetto.get('contesto')
+        st.caption('Dati usati per questa bozza: '+contesti_pdf.get(contesto_usato, 'solo anagrafica dell’impresa'))
         if verdetto.get('allegati'):
             st.info('%d valori lunghi sono riportati integralmente in allegato, '
                     'con un richiamo nel campo del modulo.' % len(verdetto['allegati']))
-        for avviso in verdetto.get('avvisi_rilettura',[]):
-            st.warning('Da confermare sulla bozza, pagina %s: %s' %
-                       (avviso['pagina'],avviso['motivo']))
+        if verdetto.get('domande_campi'):
+            st.info('%d campi attendono una risposta in «Completiamo il modulo».' % len(verdetto['domande_campi']))
         st.divider()
         testa = {controllo.COMPLETO: st.success,
                  controllo.MANCANO_DATI: st.info,
@@ -743,25 +757,76 @@ with pagina_moduli:
                     st.rerun()
 
         if verdetto.get('piano'):
-            with st.expander('Correggi o completa un campo con i dati dell’anagrafica'):
+            with st.expander('Completiamo il modulo', expanded=bool(verdetto.get('domande_campi'))):
                 mapping = json.loads((Path(st.session_state.artefatto)/'mappa.json').read_text(encoding='utf-8'))
-                campi = {a['id']: a for a in mapping['ancore'] if a['tipo'] != 'casella'
-                         and (a['tipo'] != 'widget' or a.get('parametri', {}).get('genere') == 'Text')}
-                if campi:
-                    identificativo = st.selectbox('Campo da correggere', list(campi),
-                        key='pdf_campo',
-                        format_func=lambda a: 'Pagina %d — %s' %
-                        (campi[a]['pagina']+1, campi[a].get('etichetta') or campi[a].get('contesto', '')[:90]))
-                    dato = st.selectbox('Dato da inserire', [''] + sorted(k for k,v in profilo.items() if isinstance(v,str) and v.strip()),
-                        key='pdf_dato',
-                        format_func=lambda k: 'Lascia vuoto' if not k else scheda.etichetta(k)+' — '+str(profilo[k]))
-                    if st.button('Applica la correzione alla bozza'):
-                        piano = copy.deepcopy(verdetto['piano'])
-                        piano['decisioni'][identificativo] = dict(campo=dato,
-                            stato='assegna' if dato else 'manuale', soggetto='Scelto dall’utente',
-                            motivo='Correzione confermata dall’utente', origine='utente')
+                catalogo = fonti_pdf.fonti(fascicolo, verdetto['piano'].get('contesto'))
+                domande = {d['ancora']:d for d in verdetto.get('domande_campi', [])}
+                st.caption('Conferma una proposta, scegli una fonte o rispondi per questa pratica. '
+                           'La bozza viene rifatta e controllata senza nuove chiamate AI. '
+                           'Le risposte restano associate a questo documento e a questi dati.')
+                confermabili = [k for k,d in domande.items() if d.get('confermabile')]
+                if confermabili:
+                    selezionati = st.multiselect('Proposte da confermare insieme', confermabili,
+                        key='pdf_revisione_gruppo_'+lavori.impronta_dati(confermabili)[:12],
+                        format_func=lambda k: 'Pagina %s — %s — %s → %s' %
+                            (domande[k]['pagina'], domande[k]['soggetto'], domande[k]['etichetta'], revisione_pdf.descrivi(domande[k]['proposta'])))
+                    if selezionati:
+                        st.dataframe([dict(Pagina=domande[k]['pagina'], Campo=domande[k]['etichetta'],
+                            Soggetto=domande[k]['soggetto'], Proposta=revisione_pdf.descrivi(domande[k]['proposta']),
+                            Fonte=str(domande[k]['fonte'])) for k in selezionati], hide_index=True)
+                    if st.button('Conferma le proposte selezionate', disabled=not selezionati):
+                        piano = verdetto['piano']
+                        for aid in selezionati:
+                            piano = revisione_pdf.rispondi(piano, mapping, catalogo, aid, 'conferma')
                         _compila(Path(st.session_state.modulo), confermata=True, piano=piano)
                         st.rerun()
+                solo_aperti = st.checkbox('Mostra solo i campi da risolvere', value=True,
+                                         key='pdf_revisione_solo_aperti')
+                campi = {a['id']: a for a in mapping['ancore'] if revisione_pdf.scrivibile(a)
+                         and (not solo_aperti or a['id'] in domande)}
+                if campi:
+                    identificativo = st.selectbox('Campo da correggere', list(campi),
+                        key='pdf_revisione_campo_'+lavori.impronta_dati(list(campi))[:12],
+                        format_func=lambda a: 'Pagina %d — %s' %
+                        (campi[a]['pagina']+1, campi[a].get('etichetta') or campi[a].get('contesto', '')[:90]))
+                    a = campi[identificativo]
+                    d = domande.get(identificativo, {})
+                    decisione = verdetto['piano']['decisioni'].get(identificativo, {})
+                    st.write(d.get('motivo') or decisione.get('motivo', ''))
+                    st.caption('Soggetto: '+str(d.get('soggetto') or decisione.get('soggetto') or 'da identificare'))
+                    ritaglio = _ritagli(str(st.session_state.modulo), str(st.session_state.artefatto),
+                        ((identificativo, a['pagina']+1, a['tipo']),), Path(st.session_state.modulo).stat().st_mtime)
+                    if ritaglio.get(identificativo):
+                        st.image(ritaglio[identificativo], use_container_width=True)
+                    if d.get('confermabile'):
+                        st.write('Proposta:', revisione_pdf.descrivi(d['proposta']))
+                        st.caption('Fonte: '+str(d['fonte']))
+                    azioni = (['conferma'] if d.get('confermabile') else []) + ['fonte']
+                    azioni += ['si', 'no'] if revisione_pdf.selezione(a) else ['testo']
+                    azioni += ['non_applicabile', 'manuale']
+                    nomi = {'conferma':'Conferma la proposta', 'fonte':'Scegli un dato dal fascicolo',
+                            'si':'Seleziona la casella', 'no':'Lascia la casella vuota',
+                            'testo':'Inserisci una risposta per questo modulo',
+                            'non_applicabile':'Questo campo non si applica', 'manuale':'Lo compilerò a mano'}
+                    azione = st.selectbox('Come vuoi risolvere questo campo?', azioni,
+                        key='pdf_revisione_azione_'+identificativo, format_func=nomi.get)
+                    dato, risposta = None, None
+                    if azione == 'fonte':
+                        disponibili = [k for k,v in catalogo.items() if
+                            (isinstance(v,bool) if revisione_pdf.selezione(a) else not isinstance(v,bool) and str(v).strip())]
+                        dato = st.selectbox('Dato da inserire', disponibili, key='pdf_revisione_dato_'+identificativo,
+                            format_func=lambda k: k.replace('_',' ')+' — '+revisione_pdf.descrivi(catalogo[k]))
+                    if azione == 'testo':
+                        risposta = st.text_area('Risposta per questo modulo', key='pdf_revisione_testo_'+identificativo)
+                        st.caption('Questa risposta non modifica l’anagrafica dell’impresa.')
+                    if st.button('Applica la risposta e aggiorna la bozza',
+                                 disabled=(azione=='fonte' and dato is None) or (azione=='testo' and not (risposta or '').strip())):
+                        piano = revisione_pdf.rispondi(verdetto['piano'], mapping, catalogo,
+                            identificativo, azione, campo=dato, testo=risposta)
+                        _compila(Path(st.session_state.modulo), confermata=True, piano=piano)
+                        st.rerun()
+                else:
+                    st.caption('Nessun campo in questo elenco. Puoi mostrare tutti i campi per correggere una scrittura.')
 
 
 # ----------------------------------------------------------- l'anagrafica

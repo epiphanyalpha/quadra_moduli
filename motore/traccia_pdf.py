@@ -35,6 +35,8 @@ def costruisci(mappa, piano, decisioni, scritture=(), verifica=None, origine='nu
             fase, esito, motivo = 'utente', 'escluso_utente', d.get('motivo', '')
         elif not umana and aid in bocciati:
             fase, esito, motivo = 'rilettura', 'escluso_rilettura', bocciati[aid]
+        elif d.get('stato') == 'da_confermare':
+            fase, esito, motivo = 'conferma', 'attende_risposta', d.get('motivo','')
         elif d.get('stato') == 'assegna':
             fase, esito, motivo = 'preparazione', 'dato_non_utilizzabile', 'Dato assente, vuoto o tipo non scrivibile'
         else:
@@ -51,9 +53,11 @@ def costruisci(mappa, piano, decisioni, scritture=(), verifica=None, origine='nu
                           fase=fase, esito=esito, motivo=motivo,
                           chiave=d.get('campo', '')))
     return dict(versione=2, origine=origine, ingresso_ai='fonti_con_valori',
+                riparazione_scrittura=copy.deepcopy(storia.get('riparazione_scrittura')),
                 letture_originali=copy.deepcopy(storia.get('letture_originali',{})),
                 guasti_rilettura=copy.deepcopy(storia.get('guasti_rilettura',[])),
                 pagine_rilettura=copy.deepcopy(storia.get('pagine_rilettura',{})),
-                proposta_storica=origine != 'nuova_lettura',
+                contesto=piano.get('contesto'),
+                proposta_storica=origine not in ('nuova_lettura', 'riparazione_scrittura'),
                 copertura_completa_certificata=False,
                 riepilogo=dict(Counter(r['esito'] for r in righe)), campi=righe)

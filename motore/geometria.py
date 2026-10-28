@@ -153,7 +153,55 @@ def _tracciati(pagina: fitz.Page):
                 if r.width > TOLLERANZA:
                     oriz.append((r.y0, r.x0, r.x1))
                     oriz.append((r.y1, r.x0, r.x1))
+    # Office/PDF exporters also draw dotted borders as hundreds of filled
+    # micro-rectangles. Each dot alone has neither a vertical nor a horizontal
+    # edge long enough for the normal detector. Reconstruct only supported runs.
+    pv, ph = _bordi_puntinati(rett)
+    vert.extend(pv)
+    oriz.extend(ph)
     return _fondi(vert), _fondi(oriz), rett
+
+
+def _bordi_puntinati(rettangoli):
+    from statistics import median
+    dots = [r['riquadro'] for r in rettangoli if r['pieno']
+            and 0 < min(r['riquadro'].width, r['riquadro'].height)
+            and max(r['riquadro'].width, r['riquadro'].height) <= SPESSORE_MASSIMO
+            and max(r['riquadro'].width, r['riquadro'].height) <=
+                2 * min(r['riquadro'].width, r['riquadro'].height)]
+    if len(dots) < 6:
+        return [], []
+    lato = median(max(r.width, r.height) for r in dots)
+    result = []
+    for verticale in (True, False):
+        groups = {}
+        for r in dots:
+            pos = (r.x0+r.x1)/2 if verticale else (r.y0+r.y1)/2
+            start, end = (r.y0, r.y1) if verticale else (r.x0, r.x1)
+            groups.setdefault(pos, []).append((start, end))
+        segments = []
+        for pos, members in raggruppa(groups, tolleranza=lato*0.3):
+            intervals = sorted(set(i for m in members for i in groups[m]))
+            runs = []
+            for a,b in intervals:
+                if runs and a-runs[-1][-1][1] <= lato*2.5:
+                    runs[-1].append((a,b))
+                else:
+                    runs.append([(a,b)])
+            for run in runs:
+                if len(run) < 6 or run[-1][1]-run[0][0] < 12*lato:
+                    continue
+                steps = [b[0]-a[0] for a,b in zip(run,run[1:]) if b[0]>a[0]]
+                passo = median(steps) if steps else 0
+                if not passo or sum(abs(s-passo) <= passo*0.25 for s in steps) < len(steps)*0.8:
+                    continue
+                # Adjacent dotted edges can start at different phases of the
+                # same dash pattern. Half a measured period closes a corner;
+                # it cannot bridge an arbitrary gap between separate tables.
+                fase = min(passo/2, lato*1.5)
+                segments.append((pos,run[0][0]-fase,run[-1][1]+fase))
+        result.append(segments)
+    return tuple(result)
 
 
 def _fondi(grezzi):
@@ -294,8 +342,13 @@ def completa_griglie(verticali, orizzontali, righe=()):
                 ('orizzontale', y0, x0, x1, hs), ('orizzontale', y1, x0, x1, hs)):
             if not any(abs(s.posizione-pos) <= TOLLERANZA and s.copre(start, end)
                        for s in lista):
-                lista.append(Segmento(pos, start, end))
-                inferiti.append(dict(asse=asse, posizione=pos, da=start, a=end))
+                vicini = [s for s in lista if abs(s.posizione-pos) <= TOLLERANZA
+                          and min(s.a,end)-max(s.da,start) >= (end-start)*0.8]
+                # Complete the measured axis; do not invent a parallel border
+                # because dash phases shortened its last half-period.
+                posizione = min(vicini,key=lambda s:abs(s.posizione-pos)).posizione if vicini else pos
+                lista.append(Segmento(posizione, start, end))
+                inferiti.append(dict(asse=asse, posizione=posizione, da=start, a=end))
     return vs, hs, inferiti
 
 

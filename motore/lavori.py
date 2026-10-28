@@ -20,7 +20,8 @@ def azzera_revisione(stato, word=False):
     prefisso = 'w_togli_' if word else 'togli_'
     nomi = {'w_campo', 'w_dato'} if word else {'pdf_campo', 'pdf_dato'}
     for key in list(stato):
-        if str(key).startswith(prefisso) or key in nomi:
+        if (str(key).startswith(prefisso) or key in nomi or
+                not word and str(key).startswith('pdf_revisione_')):
             del stato[key]
 
 
@@ -29,7 +30,7 @@ def sincronizza_fascicolo(stato, percorso, dati):
     if stato.get('_fascicolo_attivo') == identita:
         return
     for key in list(stato):
-        if str(key).startswith(('ana_', 'aperto_', 'togli_', 'w_togli_')):
+        if str(key).startswith(('ana_', 'aperto_', 'togli_', 'w_togli_', 'pdf_revisione_', 'pdf_contesto_')):
             del stato[key]
     for key in ('verdetto', 'bozza', 'domanda', 'rifiuto', 'artefatto',
                 'w_verdetto', 'w_bozza', 'w_domanda', 'w_rifiuto', 'w_modulo',
