@@ -89,6 +89,7 @@ Cinque PDF, stesso fascicolo di prova reale, Gemini tramite OpenRouter, cache
 disabilitata. Costo API misurato: **0,95385825 USD**. Alla fine è stata riapplicata
 senza AI la politica deterministica definitiva delle conferme; questa operazione
 è registrata separatamente e non viene presentata come una nuova lettura.
+62 chiamate HTTP riuscite; 37 pagine generate e renderizzate per l'ispezione.
 
 | Caso | Scritture verificate | Proposte applicabili con conferma |
 |---|---:|---:|
@@ -126,6 +127,23 @@ La revisione indipendente con Astra ha trovato e fatto correggere la scomparsa
 dalla coda di una risposta utente non scrivibile. Cinque verifiche mirate passate;
 nessun finding materiale aperto nel perimetro esaminato. Non è una certificazione
 di correttezza semantica dell'intero corpus.
+
+## Verifica del flusso online
+
+Il deploy `6223147` è risultato Live su Render. Sessione nuova, anagrafica
+ricaricata dopo il riavvio, istanza originale caricata dall'interfaccia:
+44 scritture materiali e due proposte confermabili. Confermata soltanto la
+classifica SOA documentata, mediante il pulsante delle conferme selezionate.
+Risultato: **45 scritture**, 25 punti ancora aperti. La scelta aggiuntiva non è
+stata confermata. La differenza nel numero di proposte rispetto alla prova
+locale documenta variabilità del modello, non un miglioramento di accuratezza.
+
+Scaricati sia rapporto sia PDF aggiornato. Il rapporto registra `piano_utente` e
+la scrittura confermata; riaperto il PDF e verificato il valore nel rettangolo
+del campo. Test automatico separato vieta chiamate AI durante l'applicazione.
+Un ultimo affinamento della visualizzazione mostra anche campo e valore di
+confronto come fonte delle proposte sulle caselle, in testo leggibile;
+16 test mirati superati sulla copia pubblica dopo questo affinamento.
 
 ## Lavoro strutturale successivo ancora necessario
 

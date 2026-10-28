@@ -127,6 +127,13 @@ class PraticaRevisionePDF(unittest.TestCase):
             result=list(piano_pdf.lavora(ROOT,source,self.profile,self.root/'runs',pertinenza_confermata=True))[-1]
         self.assertEqual(reader.call_count,1)
         self.assertEqual(result['verdetto']['domande_campi'][0]['proposta'], True)
+        question=result['verdetto']['domande_campi'][0]
+        # A boolean proposal must expose both its reference and comparison value.
+        self.assertEqual(question['fonte'],dict(campo='nome',uguale_a='Ada Verdi'))
+        display=revisione_pdf.descrivi_fonte(question['fonte'])
+        self.assertIn('nome',display)
+        self.assertIn('Ada Verdi',display)
+        self.assertNotIn('{',display)
 
     def test_explicit_answers_do_not_change_profile_or_other_slots(self):
         source, mapping = self.document(checkbox=True)

@@ -18,6 +18,18 @@ def descrivi(valore):
     return ('Casella selezionata' if valore else 'Casella vuota') if isinstance(valore, bool) else str(valore)
 
 
+def descrivi_fonte(fonte):
+    def nome(key):
+        return str(key).replace('_',' ').replace('.', ' / ')
+    if isinstance(fonte,str):
+        return nome(fonte)
+    if isinstance(fonte,list):
+        return '; '.join(nome(p.get('campo',''))+(' → '+str(p['testo']) if 'testo' in p else '') for p in fonte)
+    if isinstance(fonte,dict) and 'campo' in fonte:
+        return nome(fonte['campo'])+' confrontato con '+str(fonte.get('uguale_a',''))
+    return ''
+
+
 def richiedi_conferme(mappa, decisioni, contesto=None, avvisi=(), ambito=None):
     from . import soggetti
     by_id = {a['id']:a for a in mappa['ancore']}
@@ -76,7 +88,7 @@ def domande(mappa, piano, fonti):
         result.append(dict(ancora=a['id'], pagina=a['pagina']+1,
             etichetta=a.get('etichetta') or a.get('contesto') or a['id'],
             motivo=d.get('motivo', ''), soggetto=d.get('soggetto', ''),
-            proposta=proposta, fonte=d.get('campo') or d.get('parti') or '',
+            proposta=proposta, fonte=d.get('campo') or d.get('parti') or d.get('confronto') or '',
             selezione=selezione(a), confermabile=proposta is not None and not d.get('scrittura_fallita')))
     return result
 

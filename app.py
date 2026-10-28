@@ -773,7 +773,7 @@ with pagina_moduli:
                     if selezionati:
                         st.dataframe([dict(Pagina=domande[k]['pagina'], Campo=domande[k]['etichetta'],
                             Soggetto=domande[k]['soggetto'], Proposta=revisione_pdf.descrivi(domande[k]['proposta']),
-                            Fonte=str(domande[k]['fonte'])) for k in selezionati], hide_index=True)
+                            Fonte=revisione_pdf.descrivi_fonte(domande[k]['fonte'])) for k in selezionati], hide_index=True)
                     if st.button('Conferma le proposte selezionate', disabled=not selezionati):
                         piano = verdetto['piano']
                         for aid in selezionati:
@@ -800,7 +800,7 @@ with pagina_moduli:
                         st.image(ritaglio[identificativo], use_container_width=True)
                     if d.get('confermabile'):
                         st.write('Proposta:', revisione_pdf.descrivi(d['proposta']))
-                        st.caption('Fonte: '+str(d['fonte']))
+                        st.caption('Fonte: '+revisione_pdf.descrivi_fonte(d['fonte']))
                     azioni = (['conferma'] if d.get('confermabile') else []) + ['fonte']
                     azioni += ['si', 'no'] if revisione_pdf.selezione(a) else ['testo']
                     azioni += ['non_applicabile', 'manuale']
