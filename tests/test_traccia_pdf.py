@@ -133,6 +133,25 @@ class TracciaPDF(unittest.TestCase):
         self.assertEqual(t['campi'][0]['fase'],'non_documentata')
         self.assertIsNone(t['campi'][0]['proposta_iniziale'])
 
+    def test_review_failure_preserves_http_status_and_original_reply(self):
+        from requests import HTTPError, Response
+        from motore.anagrafe import Anagrafe
+        response=Response();response.status_code=503
+        failure=HTTPError('Service unavailable',response=response)
+        page=dict(pagina=1,testo='Nome',indirizzi={'1':'a'})
+        errors=[];diagnostics={}
+        with patch.object(agente,'_rileggi_piano_pagina',side_effect=failure):
+            rejected=agente.rileggi_documento([page],{'a':'nome'},Anagrafe({'profilo':{'nome':'Alfa'}}),
+                piano={'a':self.assigned()},errori=errors,diagnostica=diagnostics)
+        self.assertIn('a',rejected)
+        self.assertEqual(errors[0]['stato_http'],503)
+        self.assertEqual(diagnostics[1]['errore']['errore'],'HTTPError')
+        m=dict(ancore=[dict(id='a',pagina=0,etichetta='Nome',tipo='area',rect=[0,0,10,10])])
+        trace=traccia_pdf.costruisci(m,dict(diagnostica=dict(guasti_rilettura=errors,
+                                   pagine_rilettura=diagnostics)),{'a':self.assigned()})
+        self.assertEqual(trace['guasti_rilettura'][0]['pagina'],1)
+        self.assertEqual(trace['pagine_rilettura'][1]['errore']['stato_http'],503)
+
     def test_user_exclusion_does_not_get_attributed_to_review(self):
         m=dict(ancore=[dict(id='a',pagina=0,etichetta='Nome',tipo='area',rect=[0,0,10,10])])
         t=traccia_pdf.costruisci(m,dict(diagnostica=dict(proposte={'a':self.assigned()},rilettura={'a':'Storico'})),
@@ -154,6 +173,16 @@ class TracciaPDF(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertIn('Prima lettura',app.dataframe[0].value.columns)
         self.assertIn('Seconda lettura',app.dataframe[0].value.columns)
+
+        trace_path=Path(result['traccia'])
+        trace=json.loads(trace_path.read_text(encoding='utf-8'))
+        trace['guasti_rilettura']=[dict(pagina=1,errore='HTTPError',stato_http=503)]
+        trace_path.write_text(json.dumps(trace),encoding='utf-8')
+        with patch.dict(os.environ,{'ACCESSO_LIBERO':'1','APP_SCADENZA':'NESSUNA',
+                                     'CLIENTI':'','QUADRA_DATI':str(self.root)}):
+            app.run()
+        self.assertFalse(app.exception)
+        self.assertTrue(any('Compilazione incompleta' in e.value for e in app.error))
 
 
 if __name__=='__main__':

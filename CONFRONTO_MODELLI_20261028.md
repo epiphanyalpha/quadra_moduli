@@ -5,6 +5,13 @@ provati mantiene la copertura attesa e riduce i tempi, con un costo maggiore
 autorizzato dall'utente se il confronto risultava favorevole. Il modello dei
 Word resta Gemini; il motore di compilazione non cambia.
 
+**Prima verifica online dopo il cambio:** istanza 45 campi verificati;
+dichiarazioni soltanto 6, pur con 61 proposte iniziali. La traccia attribuisce
+55 sospensioni alla rilettura non disponibile su quattro pagine. Questo esito
+non convalida il cambio in produzione. Aggiunto dettaglio del guasto nel
+rapporto scaricabile e avviso esplicito di compilazione incompleta nell'app;
+segue diagnosi e nuova verifica prima della conferma definitiva del modello.
+
 ## Metodo
 
 Stessi due PDF originali e stessa anagrafica, codice del rilascio `38eaf9f`,

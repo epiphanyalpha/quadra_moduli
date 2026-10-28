@@ -507,6 +507,11 @@ with pagina_moduli:
                 if st.session_state.artefatto else None)
     if rapporto and rapporto.is_file():
         traccia = json.loads(rapporto.read_text(encoding='utf-8'))
+        if traccia.get('guasti_rilettura'):
+            pagine_guaste = ', '.join(str(g['pagina']) for g in traccia['guasti_rilettura'])
+            st.error('Compilazione incompleta: il controllo AI non e riuscito sulle pagine '
+                     + pagine_guaste + '. I relativi dati sono stati sospesi; riprova. '
+                     'Il rapporto dei campi contiene il dettaglio del guasto.')
         with st.expander('Controlla le decisioni sui campi'):
             st.caption('Per ciascuno spazio individuato: prima lettura, seconda lettura '
                        'e risultato della scrittura. Gli spazi non individuati non compaiono qui.')

@@ -268,7 +268,8 @@ def lavora(radice, pdf, fascicolo, cartella_lavoro, riusa=True,
     for aid, reason in rejected.items():
         decisions[aid].update(stato='dubbio', motivo=reason)
     piano = dict(identity, decisioni=decisions,
-                 diagnostica=dict(proposte=proposte, rilettura=rejected, avvisi=warnings))
+                 diagnostica=dict(proposte=proposte, rilettura=rejected, avvisi=warnings,
+                                  guasti_rilettura=errors, pagine_rilettura=review_details))
     yield dict(passo='scrittura', testo='Scrivo soltanto i dati con associazioni verificate.')
     event = esegui(pdf, m, piano, fascicolo, work, togli, origine='nuova_lettura')
     # Cache only a completely processed decision/review, never a failed attempt.

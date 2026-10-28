@@ -903,7 +903,11 @@ def rileggi_documento(rese, scelte: dict, anagrafe, immagini=None,
                 except Exception as exc:
                     if errori is None:
                         raise
-                    errori.append(dict(fase='rilettura',pagina=p['pagina'],errore=type(exc).__name__))
+                    guasto = dict(fase='rilettura',pagina=p['pagina'],errore=type(exc).__name__,
+                                  motivo=str(exc)[:300],
+                                  stato_http=getattr(getattr(exc,'response',None),'status_code',None))
+                    errori.append(guasto)
+                    dettagli[p['pagina']]['errore'] = guasto
                     bocciati.update({a:'Rilettura non disponibile: assegnazione sospesa'
                                      for a in p['indirizzi'].values() if a in scelte})
         if diagnostica is not None:
