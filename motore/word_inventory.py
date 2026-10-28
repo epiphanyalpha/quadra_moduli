@@ -17,12 +17,18 @@ W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 W14 = 'http://schemas.microsoft.com/office/word/2010/wordml'
 NS = {'w': W, 'w14': W14}
 VUOTO = re.compile(r'[_.…·]{2,}|[-–—]{3,}|[\u2002\u2003]{3,}|\(\s*\)')
+SEGNAPOSTO_STRUTTURATO = re.compile(r'[\s_.…·/:()\[\]\-–—]{2,}')
 CASELLA = re.compile(r'[□☐❑☒☑\uf06f\uf0a8\uf071\uf0fe\uf0fc]|\[ *\]')
 SPUNTATI = set('☒☑\uf0fe\uf0fc')
 
 
 def q(nome):
     return '{' + W + '}' + nome
+
+
+def elementi_tabella(nodo, tag, contenitore):
+    """Include SDT-wrapped rows/cells, without entering a nested table."""
+    return [el for el in nodo.iter(q(tag)) if antenato(el, contenitore) is nodo]
 
 
 def apri(dati):
@@ -123,16 +129,17 @@ def estrai(dati):
             tc = el if el.tag == q('tc') else antenato(el, 'tc')
             posizione = None
             if tc is not None:
-                tr = tc.getparent(); tb = antenato(tc, 'tbl')
-                celle = list(tr.findall('w:tc', NS))
+                tr = antenato(tc, 'tr'); tb = antenato(tc, 'tbl')
+                celle = elementi_tabella(tr, 'tc', 'tr')
                 def ampiezza(c):
                     span = c.find('w:tcPr/w:gridSpan', NS)
                     return int(span.get(q('val'), '1')) if span is not None else 1
                 prima = tr.find('w:trPr/w:gridBefore', NS)
                 colonna = int(prima.get(q('val'), '0')) if prima is not None else 0
                 colonna += sum(ampiezza(c) for c in celle[:celle.index(tc)])
-                posizione = {'tabella': percorso(tb), 'riga': list(tb.findall('w:tr', NS)).index(tr)
-                             if tr in tb.findall('w:tr', NS) else None,
+                righe_tabella = elementi_tabella(tb, 'tr', 'tbl')
+                posizione = {'tabella': percorso(tb), 'riga': righe_tabella.index(tr)
+                             if tr in righe_tabella else None,
                              'colonna_xml': celle.index(tc), 'colonna_griglia': colonna,
                              'ampiezza_griglia': ampiezza(tc)}
             voce = dict(riferimento=ref, tipo=tipo, parte=parte, percorso=percorso(el),
@@ -246,6 +253,12 @@ def estrai(dati):
                                 v['spuntata'] = chk is not None and chk.get(q('val'), '1') not in {'0', 'false', 'off'}
                             if campo['separatore'] is None or pila:
                                 v.update(scrivibile=False, motivo_tecnico='Campo Word senza risultato semplice')
+                            if cb is None:
+                                risultato_campo = ''.join(n.text or '' for n in campo['nodi']
+                                                        if n.tag == q('t')).strip()
+                                if risultato_campo and not SEGNAPOSTO_STRUTTURATO.fullmatch(risultato_campo):
+                                    v.update(scrivibile=False,
+                                             motivo_tecnico='Campo gia compilato: contenuto originale preservato')
                             occupati.update(campo['nodi'])
                         elif campo['istruzione'].strip():
                             risultato['avvisi'].append(dict(paragrafo=base, motivo='Campo Word calcolato conservato', tipo='campo_calcolato'))

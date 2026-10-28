@@ -1,49 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Esegue solo la funzione che sceglie i dati, senza contenitore.
+"""Compatibilita con i compilatori storici mediante proiezioni di dati.
 
-Serve dove un contenitore non si puo' avere: dentro un contenitore, per
-esempio. Su Render l'app gira gia' dentro Docker, e Docker dentro Docker
-non c'e', quindi con la sola `esecuzione.py` meta' dell'app - tutti i PDF -
-sarebbe spenta la' fuori. E i bandi sono quasi tutti in PDF.
-
-L'IDEA, CHE NON E' UN RIPIEGO
-
-Del programma scritto dal modello a noi serve **una funzione sola**:
-`valori(fascicolo)`, che restituisce {ancora: valore}. Tutto il resto dello
-stampo - aprire il PDF, controllare l'impronta, raddrizzare le pagine,
-scrivere, salvare - e' codice nostro, gia' scritto e gia' collaudato, e lo
-rifacciamo qui invece di farlo fare a lui.
-
-Quindi non si esegue il suo programma: gli si chiede il dizionario. E' la
-divisione che il progetto ha sempre dichiarato - il modello nomina le
-chiavi, non tocca la geometria - portata fino in fondo anche
-nell'esecuzione.
-
-CHE COSA TIENE, AL POSTO DEL CONTENITORE
-
-Quattro strati, e nessuno dei quattro e' l'unico:
-
-  1. le guardie di `motore/guardie.py`, che gia' oggi rifiutano dentro
-     valori() gli import, `open`, `exec`, `eval`, `compile`, `__import__`,
-     il documento e la geometria. Girano prima, sull'albero sintattico;
-  2. si compila SOLO la definizione di valori(), non il resto del file.
-     Quello che il modello avesse scritto altrove non viene nemmeno letto;
-  3. si esegue senza builtins, tranne una manciata di nomi innocui. Senza
-     `__import__` e senza `open`, da dentro quella funzione non si arriva
-     da nessuna parte;
-  4. si controlla quello che torna: dev'essere un dizionario, le chiavi
-     devono essere ancore che esistono davvero in questo modulo, e i valori
-     devono essere testo, numeri o si'/no. Qualunque altra cosa si butta.
-
-Il quarto e' quello che conta di piu', perche' non dipende dall'aver
-previsto le mosse di qualcun altro: qualunque cosa succeda la' dentro, di
-la' esce un dizionario di stringhe o non esce niente.
-
-RESTA UN GRADINO PIU' BASSO DEL CONTENITORE, e va detto. Il contenitore
-tiene anche contro quello che non abbiamo previsto; questo tiene contro
-quello che abbiamo previsto. Per questo `esecuzione.py` resta la prima
-scelta dove c'e': qui si arriva solo quando l'alternativa e' non compilare
-i PDF affatto.
+Il nuovo percorso applicativo PDF usa piani JSON e scrittura deterministica.
+Qui i vecchi corpi valori() vengono interpretati da motore.espressioni:
+nessuna esecuzione di Python generato, attributo arbitrario o accesso a file.
+I costrutti non supportati sono rifiutati; gli artefatti originali restano
+conservati e possono essere rigenerati come piani dichiarativi.
 """
 from __future__ import annotations
 
@@ -52,19 +14,6 @@ import json
 from pathlib import Path
 
 from motore import guardie
-
-# I nomi che restano raggiungibili dentro valori(). Sono quelli che servono
-# a maneggiare dati - unire stringhe, contare, ordinare - e nessuno di loro
-# apre file, importa o esegue testo.
-BUILTINS_AMMESSI = {
-    "True": True, "False": False, "None": None,
-    "str": str, "int": int, "float": float, "bool": bool,
-    "len": len, "dict": dict, "list": list, "tuple": tuple, "set": set,
-    "sorted": sorted, "reversed": reversed, "enumerate": enumerate,
-    "zip": zip, "range": range, "sum": sum, "min": min, "max": max,
-    "abs": abs, "round": round, "any": any, "all": all,
-    "isinstance": isinstance, "repr": repr, "format": format,
-}
 
 # Che cosa puo' esserci in un campo. Un'ancora vuole un testo, un numero o
 # una spunta: qualunque altra cosa - una funzione, un oggetto, una lista -
@@ -104,17 +53,23 @@ def scegli_valori(codice: str, fascicolo: dict, ancore: dict) -> dict:
     definizione = _definizione_di_valori(codice)
     _senza_cicli_infiniti(definizione)
 
-    modulo = ast.Module(body=[definizione], type_ignores=[])
-    ast.fix_missing_locations(modulo)
-    spazio = {"__builtins__": dict(BUILTINS_AMMESSI)}
-    exec(compile(modulo, "<valori>", "exec"), spazio)       # noqa: S102
-
     try:
-        scelte = spazio["valori"](fascicolo)
+        from motore.espressioni import proietta
+        scelte = proietta(definizione, fascicolo)
     except Exception as guaio:                              # noqa: BLE001
         raise ValoriInvalidi("valori() si e' fermata: %s" % guaio) from guaio
     if not isinstance(scelte, dict):
         raise ValoriInvalidi("valori() non ha restituito un dizionario")
+    # Old exclusion wrappers are data, never a second function to execute.
+    for nodo in ast.parse(codice).body:
+        if isinstance(nodo, ast.Assign) and any(isinstance(t, ast.Name) and t.id == '_TOLTE' for t in nodo.targets):
+            try:
+                tolte = ast.literal_eval(nodo.value)
+                if not isinstance(tolte, list) or not all(isinstance(a, str) for a in tolte):
+                    raise ValueError('Filtro non valido')
+                scelte = {a: v for a, v in scelte.items() if a not in tolte}
+            except (ValueError, TypeError) as exc:
+                raise ValoriInvalidi('Filtro di esclusione non interpretabile') from exc
 
     # Il filtro finale: qui non si giudica il senso, si giudica la forma.
     # Un'ancora che non esiste non ha un posto dove andare, e un valore che

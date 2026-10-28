@@ -98,6 +98,7 @@ class Pagina:
     celle: list = field(default_factory=list)
     widget: list = field(default_factory=list)
     corpo: float = 9.0           # il corpo piu' diffuso nella pagina
+    bordi_inferiti: list = field(default_factory=list)
 
     def testo_in(self, rect, margine: float = 0.0) -> str:
         r = fitz.Rect(rect) + (-margine, -margine, margine, margine)
@@ -236,16 +237,56 @@ def _celle(verticali, orizzontali, altezza_minima: float = 3.5,
     return celle
 
 
+def completa_griglie(verticali, orizzontali):
+    """Infer only outer edges supported by a repeated, connected table grid.
+
+    Three shared dividers and three crossbars must agree on their extent.
+    No internal divider is invented: merged cells and adjacent tables retain
+    their real geometry. The inferred segments are evidence, not page ink.
+    """
+    from collections import Counter
+    gruppi = {}
+    for s in verticali:
+        key = next((k for k in gruppi if abs(k[0]-s.da) <= TOLLERANZA
+                    and abs(k[1]-s.a) <= TOLLERANZA), (s.da, s.a))
+        gruppi.setdefault(key, []).append(s)
+    vs, hs, inferiti = list(verticali), list(orizzontali), []
+    for (y0, y1), montanti in gruppi.items():
+        if len(raggruppa([s.posizione for s in montanti])) < 3:
+            continue
+        traverse = [s for s in orizzontali if y0-TOLLERANZA <= s.posizione <= y1+TOLLERANZA
+                    and all(s.copre(v.posizione, v.posizione) for v in montanti)]
+        if len(raggruppa([s.posizione for s in traverse])) < 3:
+            continue
+        # A common outer span, rather than a single long page separator.
+        spans = Counter((round(s.da, 1), round(s.a, 1)) for s in traverse)
+        (x0, x1), count = spans.most_common(1)[0]
+        if count < 3 or count < len(traverse)*0.75:
+            continue
+        if not (x0 <= min(s.posizione for s in montanti) and
+                x1 >= max(s.posizione for s in montanti)):
+            continue
+        for asse, pos, start, end, lista in (
+                ('verticale', x0, y0, y1, vs), ('verticale', x1, y0, y1, vs),
+                ('orizzontale', y0, x0, x1, hs), ('orizzontale', y1, x0, x1, hs)):
+            if not any(abs(s.posizione-pos) <= TOLLERANZA and s.copre(start, end)
+                       for s in lista):
+                lista.append(Segmento(pos, start, end))
+                inferiti.append(dict(asse=asse, posizione=pos, da=start, a=end))
+    return vs, hs, inferiti
+
+
 def leggi(pagina: fitz.Page, numero: int) -> Pagina:
     """Misura una pagina gia' portata a rotazione 0."""
     verticali, orizzontali, rettangoli = _tracciati(pagina)
+    griglia_v, griglia_h, inferiti = completa_griglie(verticali, orizzontali)
     caratteri, righe = _testo(pagina)
     corpi = [round(c.dimensione, 1) for c in caratteri if c.testo.isalnum()]
     corpo = max(set(corpi), key=corpi.count) if corpi else 9.0
     p = Pagina(numero=numero, corpo=corpo, riquadro=fitz.Rect(pagina.rect),
                verticali=verticali, orizzontali=orizzontali, rettangoli=rettangoli,
                caratteri=caratteri, righe=righe,
-               celle=_celle(verticali, orizzontali),
+               celle=_celle(griglia_v, griglia_h), bordi_inferiti=inferiti,
                widget=list(pagina.widgets()))
     p._pagina = pagina
     return p

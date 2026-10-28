@@ -21,6 +21,8 @@ import fitz
 from riusare.strumenti_documento import Ancora, PagineDiritte, impronta, svuota_misure
 from motore import classificatore, geometria, resa
 
+VERSIONE = 2
+
 
 def costruisci(percorso) -> dict:
     percorso = Path(percorso)
@@ -47,7 +49,7 @@ def costruisci(percorso) -> dict:
     finally:
         doc.close()
         svuota_misure()
-    return {"documento": percorso.name,
+    return {"documento": percorso.name, "versione": VERSIONE,
             "impronta": impronta(percorso),
             "pagine": pagine,
             "rese": rese,

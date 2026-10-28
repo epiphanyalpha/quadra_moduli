@@ -8,6 +8,8 @@ import os
 import re
 import subprocess
 import tempfile
+import hashlib
+import threading
 from pathlib import Path
 
 LIBREOFFICE = (
@@ -35,6 +37,32 @@ def e_docx(percorso) -> bool:
 
 
 _PROFILO = None
+_CONVERSIONE_LOCK = threading.RLock()
+
+
+def _converti_file(percorso, cartella, formato):
+    """Only publish a fresh successful conversion, never a previous file."""
+    programma = _soffice()
+    if not programma:
+        raise ConversioneAssente('Per convertire questo documento serve LibreOffice.')
+    cartella.mkdir(parents=True, exist_ok=True)
+    with _CONVERSIONE_LOCK, tempfile.TemporaryDirectory(dir=cartella) as directory:
+        try:
+            esito = subprocess.run([programma, '-env:UserInstallation=' + _profilo(),
+                '--headless', '--convert-to', formato, '--outdir', directory, str(percorso)],
+                capture_output=True, timeout=120, check=False)
+        except subprocess.TimeoutExpired as exc:
+            raise ConversioneAssente('La conversione ha superato il tempo disponibile.') from exc
+        nuovo = Path(directory) / (percorso.stem + '.' + formato)
+        if esito.returncode != 0 or not nuovo.is_file():
+            raise ConversioneAssente('LibreOffice non ha completato la conversione di ' + percorso.name)
+        if formato == 'docx' and not e_docx(nuovo):
+            raise ConversioneAssente('Il risultato della conversione non e un DOCX valido.')
+        if formato == 'pdf' and not nuovo.read_bytes().startswith(b'%PDF'):
+            raise ConversioneAssente('Il risultato della conversione non e un PDF valido.')
+        destinazione = cartella / nuovo.name
+        nuovo.replace(destinazione)
+    return destinazione
 
 
 def _profilo() -> str:
@@ -73,16 +101,7 @@ def converti(percorso, cartella) -> Path:
             "Questo e' un documento Word vecchio (.doc) e serve LibreOffice "
             "per aprirlo. Installalo, oppure aprilo con Word e salvalo come "
             ".docx.")
-    cartella.mkdir(parents=True, exist_ok=True)
-    subprocess.run([programma, "-env:UserInstallation=" + _profilo(),
-                    "--headless", "--convert-to", "docx",
-                    "--outdir", str(cartella), str(percorso)],
-                   capture_output=True, timeout=180, check=False)
-    fatto = cartella / (percorso.stem + ".docx")
-    if not fatto.is_file():
-        raise ConversioneAssente("LibreOffice non ha prodotto il .docx da %s"
-                                 % percorso.name)
-    return fatto
+    return _converti_file(percorso, cartella, 'docx')
 
 
 def in_pdf(percorso, cartella) -> Path:
@@ -105,17 +124,14 @@ def in_pdf(percorso, cartella) -> Path:
             "lo stesso e si puo' scaricare: manca solo il modo di mostrarla.")
     cartella.mkdir(parents=True, exist_ok=True)
     fatto = cartella / (percorso.stem + ".pdf")
+    marchio = fatto.with_suffix('.pdf.sha256')
+    attesa = hashlib.sha256(percorso.read_bytes()).hexdigest()
     # Se la bozza e' piu' nuova del PDF si rifa', altrimenti si riusa: la
     # conversione costa qualche secondo e la pagina si ridisegna spesso.
-    if fatto.is_file() and fatto.stat().st_mtime >= percorso.stat().st_mtime:
+    if fatto.is_file() and marchio.is_file() and marchio.read_text() == attesa:
         return fatto
-    subprocess.run([programma, "-env:UserInstallation=" + _profilo(),
-                    "--headless", "--convert-to", "pdf",
-                    "--outdir", str(cartella), str(percorso)],
-                   capture_output=True, timeout=180, check=False)
-    if not fatto.is_file():
-        raise ConversioneAssente("LibreOffice non ha prodotto il PDF da %s"
-                                 % percorso.name)
+    fatto = _converti_file(percorso, cartella, 'pdf')
+    marchio.write_text(attesa)
     return fatto
 
 

@@ -160,25 +160,35 @@ def _chiedi(messaggi: list, temperatura: float = 0.0, tetto: int = None) -> str:
     import requests
     tetto = tetto or tetto_di_base
     ultimo = None
+    scadenza = _tempo.monotonic() + float(os.getenv('QUADRA_BUDGET_RETE', '180'))
     for tentativo in range(TENTATIVI_RETE):
         try:
+            residuo = scadenza - _tempo.monotonic()
+            if residuo <= 0:
+                raise requests.Timeout('Tempo disponibile per il servizio esaurito')
             risposta = requests.post(
                 base + "/chat/completions",
                 headers={"Authorization": "Bearer " + chiave,
                          "Content-Type": "application/json"},
                 json={"model": modello, "messages": messaggi,
                       "max_tokens": tetto, "temperature": temperatura},
-                timeout=600)
+                timeout=(min(15, residuo), min(float(os.getenv('QUADRA_TIMEOUT_RETE', '90')), residuo)))
             risposta.raise_for_status()
             break
-        except Exception as guaio:                         # noqa: BLE001
+        except requests.RequestException as guaio:
             # su cento chiamate qualcuna cade: non deve buttare via la corsa
             ultimo = guaio
-            if tentativo == TENTATIVI_RETE - 1:
+            status = getattr(getattr(guaio, 'response', None), 'status_code', None)
+            if tentativo == TENTATIVI_RETE - 1 or status in (400, 401, 403, 404):
                 raise
             _tempo.sleep(2 * (tentativo + 1))
-    dati = risposta.json()
-    scelta = dati["choices"][0]
+    try:
+        dati = risposta.json()
+        scelta = dati['choices'][0]
+        if not isinstance(scelta['message'].get('content'), (str, type(None))):
+            raise ValueError('Contenuto non testuale')
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise RispostaModelloInvalida('Risposta del servizio incompleta o non interpretabile') from exc
     if scelta.get("finish_reason") == "length" and not scelta["message"].get("content"):
         raise RuntimeError("il modello ha esaurito il budget pensando e non ha "
                            "restituito niente: alza QUADRA_TETTO_GETTONI")
@@ -267,10 +277,13 @@ pertinente resta true e il dettaglio diventa un punto aperto piu' avanti.
     risposta = _chiedi([_messaggio(richiesta, figure)])
     grezzo = _blocco(risposta, "json") or risposta
     try:
-        return json.loads(grezzo)
+        giudizio = json.loads(grezzo)
+        if not isinstance(giudizio, dict) or not isinstance(giudizio.get('pertinente'), bool):
+            raise ValueError('Giudizio incompleto')
+        return giudizio
     except ValueError:
-        return {"pertinente": True, "motivo": "risposta non interpretabile",
-                "domanda": None, "grezzo": risposta[:2000]}
+        return {"pertinente": False, "motivo": "Non ho potuto verificare la pertinenza del modulo.",
+                "domanda": "Confermi che questo modulo riguarda questa impresa?"}
 
 
 # --------------------------------------------------------------- i valori
@@ -477,8 +490,22 @@ precedente di elencare solo i posti riempiti. Nessun limite di capienza Word.
 """
     risposta = _chiedi([_messaggio(richiesta, [immagine] if immagine else ())])
     deciso = {}
+    conflitti = set()
+    visti = {}
     for voce in _lista_risposta(risposta, "campo"):
         campo, posto = voce["campo"], str(voce["posto"])
+        if posto in indirizzi:
+            aid = indirizzi[posto]
+            if aid in conflitti or (aid in visti and visti[aid] != campo):
+                if scartate is None:
+                    raise RispostaModelloInvalida('Decisioni contraddittorie sullo stesso posto')
+                conflitti.add(aid)
+                deciso.pop(aid, None)
+                scartate.append(dict(posto=posto, campo=campo, perche='Decisioni contraddittorie sullo stesso posto'))
+                if decisioni is not None:
+                    decisioni[aid] = dict(campo='', motivo='Decisioni contraddittorie: lasciato vuoto')
+                continue
+            visti[aid] = campo
         if decisioni is not None and posto in indirizzi:
             decisioni[indirizzi[posto]] = {"campo": campo, "motivo": str(voce.get("motivo") or "Motivo non restituito")[:500]}
             if not campo:
@@ -490,16 +517,6 @@ precedente di elencare solo i posti riempiti. Nessun limite di capienza Word.
                              "perche": "posto o chiave fuori dal contratto"})
             continue
         aid = indirizzi[posto]
-        if aid in deciso and deciso[aid] != campo:
-            if scartate is None:
-                raise RispostaModelloInvalida(
-                    "Assegnazioni contraddittorie allo stesso posto")
-            # due chiavi diverse sullo stesso posto: non si sceglie a caso,
-            # si lascia vuoto e si toglie anche la prima
-            scartate.append({"posto": posto, "campo": campo,
-                             "perche": "due chiavi diverse sullo stesso posto"})
-            deciso.pop(aid, None)
-            continue
         deciso[aid] = campo
     return deciso
 
@@ -560,6 +577,49 @@ def rileggi_pagina(testo_compilato: str, indirizzi: dict, immagine=None) -> dict
             raise RispostaModelloInvalida("Posto di rilettura sconosciuto")
         bocciati[indirizzi[posto]] = voce["perche"][:240]
     return bocciati
+
+
+def decidi_campi(testo, indirizzi, campi, chiavi, immagine=None):
+    """A complete, declarative inventory: the model never supplies Python."""
+    istruzioni = '''Leggi un modulo e associa solo dati anagrafici del fascicolo.
+Per OGNI posto restituisci una voce JSON con posto, campo, stato, soggetto, motivo.
+stato deve essere: assegna, dato_assente, dubbio, manuale, non_campo.
+campo e una chiave ESATTA fra quelle disponibili, oppure stringa vuota.
+soggetto descrive chi deve fornire quel dato (impresa, firmatario, altra persona).
+Considera la sezione, la riga, la colonna e i soggetti: etichette uguali non
+implicano dati uguali. Ripeti un dato quando richiesto per lo stesso soggetto.
+Non compilare dati di altre persone con quelli del firmatario. Se il fascicolo
+contiene solo un aggregato, non inserirlo dove serve una sua parte. Non inventare
+valori, chiavi, date o dichiarazioni. Caselle, firme e attestazioni restano manuali.
+Uno spazio geometrico puo essere impaginazione: usa non_campo quando non chiede dati.
+I bordi inferiti non provano che il campo sia pertinente. Usa l'immagine per
+verificare la relazione tra etichetta e spazio. Se non puoi stabilirla usa dubbio.
+Rispondi solo con una lista JSON, senza codice, una voce per ogni posto.
+'''
+    payload = dict(chiavi=list(chiavi), campi=campi, pagina=testo)
+    risposta = _chiedi([_messaggio(istruzioni + json.dumps(payload, ensure_ascii=False),
+                                  [immagine] if immagine else ())])
+    voci = _lista_risposta(risposta, 'campo')
+    result, seen = {}, set()
+    for voce in voci:
+        posto = str(voce['posto'])
+        if posto not in indirizzi:
+            continue
+        aid = indirizzi[posto]
+        if aid in seen:
+            result[aid] = dict(campo='', stato='dubbio', soggetto='', motivo='Decisioni duplicate sul campo')
+            continue
+        seen.add(aid)
+        campo, stato = voce['campo'], voce.get('stato')
+        soggetto = str(voce.get('soggetto') or '').strip()[:200]
+        motivo = str(voce.get('motivo') or '').strip()[:500]
+        if stato not in {'assegna', 'dato_assente', 'dubbio', 'manuale', 'non_campo'} or (campo and campo not in chiavi) or (stato == 'assegna' and (not campo or not soggetto or not motivo)):
+            campo, stato, motivo = '', 'dubbio', 'Decisione incompleta o fuori contratto'
+        result[aid] = dict(campo=campo, stato=stato, soggetto=soggetto, motivo=motivo)
+    for aid in indirizzi.values():
+        result.setdefault(aid, dict(campo='', stato='dubbio', soggetto='',
+                                   motivo='Il modello non ha restituito una decisione'))
+    return result
 
 
 def con_i_valori(testo_pagina: str, indirizzi: dict, scelte: dict,

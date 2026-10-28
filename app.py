@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import copy
 from pathlib import Path
 
 import fitz
@@ -30,6 +31,7 @@ import streamlit as st
 import esecuzione
 from motore import (accesso, agente, compilatore, controllo, fascicoli,
                     lavorazione, lavorazione_word, scheda, soggetti, word)
+from motore import lavori
 
 RADICE = Path(__file__).resolve().parent
 
@@ -136,7 +138,7 @@ def _pagine_segnate(bozza, artefatto, verificate):
     return fuori
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=2, ttl=600)
 def _ritagli(bozza: str, artefatto: str, ancore_scritte: tuple, quando: float):
     """Un ritaglio di foglio per ogni scrittura: la riga com'e' venuta.
 
@@ -243,7 +245,7 @@ def _dove_sul_foglio(documento, scritture):
     return fuori
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=2, ttl=600)
 def _anteprima_word(bozza: str, scritture: tuple, quando: float):
     """Le pagine della bozza Word, con ogni scrittura cerchiata e numerata.
 
@@ -384,6 +386,9 @@ with st.sidebar:
                 "  —  DATI FINTI"
                 if fascicoli.e_di_prova(fascicoli.carica(p)) else ""))
     fascicolo = fascicoli.carica(scelto)
+    lavori.sincronizza_fascicolo(st.session_state, scelto, fascicolo)
+    if st.session_state.get('_salvataggio_anagrafica'):
+        st.success(st.session_state.pop('_salvataggio_anagrafica'))
     profilo = fascicolo.get("profilo", {})
     st.caption(profilo.get("ragione_sociale", ""))
     # Detto qui e detto forte: una bozza compilata con dati inventati sembra
@@ -443,15 +448,17 @@ with pagina_moduli:
     st.title("Compila un modulo")
     caricato = st.file_uploader("Trascina qui il PDF del modulo", type="pdf")
 
-    def _compila(modulo: Path, confermata: bool = False):
+    def _compila(modulo: Path, confermata: bool = False, piano=None, togli=()):
         st.session_state.passi, st.session_state.verdetto = [], None
         st.session_state.bozza, st.session_state.domanda = None, None
         st.session_state.avvisi, st.session_state.rifiuto = [], None
+        st.session_state.artefatto = None
         barra = st.empty()
         racconto = st.container()
         try:
             for passo in lavorazione.lavora(RADICE, modulo, fascicolo, LAVORO,
-                                            pertinenza_confermata=confermata):
+                                            pertinenza_confermata=confermata,
+                                            piano_di_prima=piano, togli=togli):
                 st.session_state.passi.append(passo)
                 _, arrivato = lavorazione.fase(passo)
                 if arrivato:
@@ -479,10 +486,16 @@ with pagina_moduli:
             st.error(str(fermata))
         except agente.ModelloAssente as fermata:
             st.error(str(fermata))
+        except Exception as fermata:
+            st.session_state.verdetto = None
+            st.session_state.bozza = None
+            st.error('Non ho completato la compilazione (%s). Nessuna nuova bozza verificata disponibile.'
+                     % type(fermata).__name__)
 
     if caricato is not None and st.button("Compila", type="primary"):
+        lavori.azzera_revisione(st.session_state)
         LAVORO.mkdir(parents=True, exist_ok=True)
-        modulo = LAVORO / caricato.name
+        modulo = lavori.nuova_cartella(LAVORO) / Path(caricato.name).name
         modulo.write_bytes(caricato.getbuffer())
         st.session_state.modulo = str(modulo)
         _compila(modulo)
@@ -566,10 +579,9 @@ with pagina_moduli:
                 if salvabili:
                     st.subheader("Mancano %d dati dell'impresa" % len(salvabili))
                 else:
-                    st.subheader("L'anagrafica è a posto")
-                    st.caption("Tutto quello che il fascicolo sa su questa "
-                               "impresa è finito sulla bozza. Il resto del "
-                               "modulo riguarda questa pratica e lo compili tu.")
+                    st.subheader("Campi da verificare sulla bozza")
+                    st.caption("Questi campi sono rimasti vuoti. Controlla se "
+                               "richiedono dati dell'impresa o informazioni della pratica.")
 
                 con_nome = [p for p in a_mano if (p["etichetta"] or "").strip()]
                 muti = len(a_mano) - len(con_nome)
@@ -588,8 +600,8 @@ with pagina_moduli:
                                      % len(salvabili)):
                         st.caption("Sono dati dell'impresa che il fascicolo non "
                                    "ha ancora. Rispondendo qui restano buoni "
-                                   "per tutti i moduli futuri, e questo si rifa' "
-                                   "senza nuove chiamate al modello.")
+                                   "per tutti i moduli futuri. Dopo il salvataggio "
+                                   "ricompila per verificare le associazioni con i dati aggiornati.")
                         with st.form("punti"):
                             risposte = {}
                             for p in salvabili:
@@ -602,7 +614,7 @@ with pagina_moduli:
                                 risposte[p["ancora"]] = st.text_input(
                                     etichetta, key="aperto_" + p["ancora"],
                                     help=p.get("motivo"))
-                            if st.form_submit_button("Salva nel fascicolo e rifai"):
+                            if st.form_submit_button("Salva i dati nel fascicolo"):
                                 aggiornati = 0
                                 for p in salvabili:
                                     valore = (risposte.get(p["ancora"]) or "").strip()
@@ -612,9 +624,8 @@ with pagina_moduli:
                                     aggiornati += 1
                                 if aggiornati:
                                     fascicoli.salva(scelto, fascicolo)
-                                    st.success("%d dati salvati. Premi Compila: "
-                                               "riusa il programma gia' fatto, "
-                                               "senza spendere." % aggiornati)
+                                    st.session_state['_salvataggio_anagrafica'] = "%d dati salvati. Premi Compila per verificare e aggiornare la bozza." % aggiornati
+                                    st.rerun()
                                 else:
                                     st.caption("Non hai scritto niente.")
 
@@ -667,13 +678,17 @@ with pagina_moduli:
                         st.caption(r.get("riga") or r["etichetta"] or r["ancora"])
             if st.button("Rifai la bozza senza i %d campi spuntati" % len(da_togliere),
                          disabled=not da_togliere or not st.session_state.artefatto):
+                if verdetto.get('piano'):
+                    _compila(Path(st.session_state.modulo), confermata=True,
+                             piano=verdetto['piano'], togli=da_togliere)
+                    st.rerun()
                 cartella = Path(st.session_state.artefatto)
                 codice = (cartella / "programma.py").read_text(encoding="utf-8")
                 mappa_art = json.loads((cartella / "mappa.json").read_text(encoding="utf-8"))
                 note_art = json.loads((cartella / "note.json").read_text(encoding="utf-8"))
                 originale = Path(st.session_state.modulo)
                 esito = esecuzione.esegui_al_meglio(compilatore.senza(codice, da_togliere),
-                                          originale, LAVORO, fascicolo)
+                                          originale, lavori.nuova_cartella(LAVORO), fascicolo)
                 if not esito["riuscita"]:
                     st.error("Non sono riuscito a rifarla: %s"
                              % (esito["stderr"] or esito["stdout"])[:300])
@@ -690,6 +705,27 @@ with pagina_moduli:
                     st.success("Rifatta senza %d campi. Scaricala qui accanto."
                                % len(da_togliere))
                     st.rerun()
+
+        if verdetto.get('piano'):
+            with st.expander('Correggi o completa un campo con i dati dell’anagrafica'):
+                mapping = json.loads((Path(st.session_state.artefatto)/'mappa.json').read_text(encoding='utf-8'))
+                campi = {a['id']: a for a in mapping['ancore'] if a['tipo'] != 'casella'
+                         and (a['tipo'] != 'widget' or a.get('parametri', {}).get('genere') == 'Text')}
+                if campi:
+                    identificativo = st.selectbox('Campo da correggere', list(campi),
+                        key='pdf_campo',
+                        format_func=lambda a: 'Pagina %d — %s' %
+                        (campi[a]['pagina']+1, campi[a].get('etichetta') or campi[a].get('contesto', '')[:90]))
+                    dato = st.selectbox('Dato da inserire', [''] + sorted(k for k,v in profilo.items() if isinstance(v,str) and v.strip()),
+                        key='pdf_dato',
+                        format_func=lambda k: 'Lascia vuoto' if not k else scheda.etichetta(k)+' — '+str(profilo[k]))
+                    if st.button('Applica la correzione alla bozza'):
+                        piano = copy.deepcopy(verdetto['piano'])
+                        piano['decisioni'][identificativo] = dict(campo=dato,
+                            stato='assegna' if dato else 'manuale', soggetto='Scelto dall’utente',
+                            motivo='Correzione confermata dall’utente', origine='utente')
+                        _compila(Path(st.session_state.modulo), confermata=True, piano=piano)
+                        st.rerun()
 
 
 # ----------------------------------------------------------- l'anagrafica
@@ -747,8 +783,9 @@ with pagina_word:
                      % type(fermata).__name__)
 
     if caricato_w is not None and st.button("Compila il Word", type="primary"):
+        lavori.azzera_revisione(st.session_state, word=True)
         LAVORO_WORD.mkdir(parents=True, exist_ok=True)
-        modulo_w = LAVORO_WORD / caricato_w.name
+        modulo_w = lavori.nuova_cartella(LAVORO_WORD) / Path(caricato_w.name).name
         modulo_w.write_bytes(caricato_w.getbuffer())
         st.session_state.w_modulo = str(modulo_w)
         _compila_word(modulo_w, condizioni=condizioni_w)
@@ -862,6 +899,25 @@ with pagina_word:
                 for m in vw["mancate"]:
                     st.caption("%s — %s" % (m["valore"][:60], m["motivo"]))
 
+        if vw.get('decisioni_campi'):
+            with st.expander('Correggi o completa un campo Word con i dati dell’anagrafica'):
+                campi_w = {a:d for a,d in vw['decisioni_campi'].items()
+                           if d.get('scrivibile', True) and d.get('tipo') != 'casella'}
+                identificativo_w = st.selectbox('Campo Word da correggere', list(campi_w), key='w_campo',
+                    format_func=lambda a: campi_w[a].get('etichetta') or a)
+                dato_w = st.selectbox('Dato da inserire nel Word',
+                    [''] + sorted(k for k,v in profilo.items() if isinstance(v,str) and v.strip()), key='w_dato',
+                    format_func=lambda k: 'Lascia vuoto' if not k else scheda.etichetta(k)+' — '+str(profilo[k]))
+                if st.button('Applica la correzione al Word', disabled=not identificativo_w):
+                    scelte = dict(vw.get('scelte', {}))
+                    if dato_w:
+                        scelte[identificativo_w] = dato_w
+                    else:
+                        scelte.pop(identificativo_w, None)
+                    _compila_word(Path(st.session_state.w_modulo), confermata=True,
+                                  condizioni=condizioni_w, scelte_di_prima=scelte)
+                    st.rerun()
+
 
 with pagina_anagrafica:
     st.title("Anagrafica")
@@ -940,9 +996,8 @@ with pagina_anagrafica:
                                       modifiche[chiave])
                 if cambiati:
                     fascicoli.salva(scelto, fascicolo)
-                    st.success("Salvati %d dati: %s."
-                               % (len(cambiati),
-                                  ", ".join(scheda.etichetta(k) for k in cambiati)))
+                    st.session_state['_salvataggio_anagrafica'] = "Salvati %d dati." % len(cambiati)
+                    st.rerun()
                 else:
                     st.caption("Nessun dato cambiato.")
 
@@ -964,4 +1019,5 @@ with pagina_anagrafica:
                         fascicoli.imposta(fascicolo, "profilo." + pulito,
                                           valore_nuovo.strip())
                         fascicoli.salva(scelto, fascicolo)
-                        st.success("Aggiunto «%s»." % scheda.etichetta(pulito))
+                        st.session_state['_salvataggio_anagrafica'] = "Aggiunto «%s»." % scheda.etichetta(pulito)
+                        st.rerun()

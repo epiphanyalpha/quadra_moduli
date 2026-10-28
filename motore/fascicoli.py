@@ -43,8 +43,8 @@ def veri(radice: Path):
 
 
 def salva(percorso, fascicolo: dict):
-    Path(percorso).write_text(json.dumps(fascicolo, ensure_ascii=False, indent=1),
-                              encoding="utf-8")
+    from .lavori import salva_json
+    salva_json(percorso, fascicolo)
 
 
 def imposta(fascicolo: dict, chiave: str, valore):

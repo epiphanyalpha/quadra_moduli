@@ -21,16 +21,18 @@ def _table_context(point, roots):
         return '', False
     root = roots[point['parte']]
     cell = inventory.antenato(patch.nodo(root, point['percorso_paragrafo']), 'tc')
-    row = cell.getparent()
-    cells = list(row.findall('w:tc', inventory.NS))
+    row = inventory.antenato(cell, 'tr')
+    cells = inventory.elementi_tabella(row, 'tc', 'tr')
     column = cells.index(cell)
     text = lambda c: ' '.join(inventory.testo_ancore(p)[0].strip()
                              for p in c.iter(inventory.q('p'))
                              if inventory.antenato(p, 'tc') is c).strip()
     left = text(cells[column - 1]) if column else ''
     table = inventory.antenato(cell, 'tbl')
-    rows = table.findall('w:tr', inventory.NS)
-    headers = rows[0].findall('w:tc', inventory.NS)
+    rows = inventory.elementi_tabella(table, 'tr', 'tbl')
+    if not rows or cell not in cells:
+        return left, False
+    headers = inventory.elementi_tabella(rows[0], 'tc', 'tr')
     # Grid coordinates, rather than XML indices, preserve context across merged cells.
     header = ''
     grid = 0
@@ -40,7 +42,7 @@ def _table_context(point, roots):
         if grid <= pos['colonna_griglia'] < grid + width:
             header = text(h)
         grid += width
-    empty_rows = sum(not any(text(c) for c in r.findall('w:tc', inventory.NS)) for r in rows[1:])
+    empty_rows = sum(not any(text(c) for c in inventory.elementi_tabella(r, 'tc', 'tr')) for r in rows[1:])
     listing = len(headers) > 1 and all(text(c) for c in headers) and empty_rows >= 2 and row is not rows[0]
     return left or (header if row is not rows[0] else ''), listing
 

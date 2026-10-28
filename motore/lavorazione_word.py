@@ -15,9 +15,11 @@ import json
 import time
 import uuid
 from pathlib import Path
+from requests import RequestException
 
 from motore import agente, soggetti, word
 from motore.anagrafe import Anagrafe
+from motore.lavori import nuova_cartella
 
 # Quante volte si richiede al modello quando la risposta arriva illeggibile.
 # Due, non di piu': in Word non c'e' codice da eseguire e da far fallire, e
@@ -99,8 +101,7 @@ def _lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
     decisione e' anche gratis e immediato, mentre richiamarla si paga.
     """
     documento = Path(documento)
-    cartella_lavoro = Path(cartella_lavoro)
-    cartella_lavoro.mkdir(parents=True, exist_ok=True)
+    cartella_lavoro = nuova_cartella(cartella_lavoro)
 
     yield {"passo": "misura", "testo": "Leggo il modulo Word."}
     try:
@@ -143,7 +144,12 @@ def _lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
     else:
         yield {"passo": "pertinenza",
                "testo": "Controllo che il modulo sia di questa impresa."}
-        with agente.usando(word_ai):
+        try:
+            with agente.usando(word_ai):
+                giudizio = agente.pertinenza(testo[:4000], fascicolo)
+        except (RequestException, agente.RispostaModelloInvalida):
+            if not word_ai:
+                raise
             giudizio = agente.pertinenza(testo[:4000], fascicolo)
         if not giudizio.get("pertinente", True):
             yield {"passo": "domanda_bloccante", "verdetto": None,
@@ -215,17 +221,19 @@ def _lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
                     deciso = agente.abbina_pagina(testo, indirizzi, chiavi,
                                                   scartate=scartate, decisioni=decisioni_ai)
                 break
-            except agente.RispostaModelloInvalida as storto:
+            except (agente.RispostaModelloInvalida, RequestException) as storto:
                 if tentativo == len(giri):
-                    yield {"passo": "verdetto", "verdetto": None,
-                           "testo": "Il modello ha risposto in un modo che non "
-                                    "riesco a leggere, %s: %s. Non ho scritto "
+                    motivo = ("Il modello ha risposto in un modo che non riesco a leggere"
+                              if isinstance(storto, agente.RispostaModelloInvalida) else
+                              "Il servizio non ha restituito una risposta utilizzabile")
+                    yield {"passo": "rifiuto", "verdetto": None,
+                           "testo": motivo + ", %s (%s). Non ho scritto "
                                     "niente." % ("due volte di fila" if len(giri) == 2
                                                  else "anche col modello di riserva",
-                                                 storto)}
+                                                 type(storto).__name__)}
                     return
                 yield {"passo": "valori", "tentativo": tentativo,
-                       "testo": "La risposta e' arrivata illeggibile: "
+                       "testo": "La richiesta non ha prodotto una risposta utilizzabile: "
                                 + ("richiedo la stessa cosa." if giri[tentativo] is config
                                    else "la chiedo al modello di riserva.")}
         deciso = {a: c for a, c in deciso.items() if a not in spente}
@@ -324,6 +332,7 @@ def _lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
                          "da_verificare" if (verdetto["irrisolti"] or guasti or
                                               verdetto["avvisi_tecnici"] or
                                               verdetto["non_trovate"] or
+                                              verdetto["contraddizioni"] or
                                               verdetto["mancate"]) else "compilato")
     verdetto["senza_dato"] = sorted(set(senza_dato))
     verdetto["spenti"] = len(spente)
@@ -333,6 +342,7 @@ def _lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
     verdetto["scelte"] = dict(chiavi_scelte)
     verdetto['decisioni_campi'] = {
         a['id']: dict(etichetta=a['etichetta'],
+                      scrivibile=a.get('scrivibile', True), tipo=a['tipo'],
                       proposta=decisioni_ai.get(a['id']),
                       prima_rilettura=prima_rilettura.get(a['id']),
                       bocciatura=bocciati.get(a['id']),

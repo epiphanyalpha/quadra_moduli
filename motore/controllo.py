@@ -81,6 +81,13 @@ def _punti_aperti(mappa: dict, note: dict, scritte: set) -> list:
                        "chiave": punto.get("chiave", ""),
                        "motivo": punto.get("motivo", "")})
     aperti.sort(key=lambda p: (p["pagina"], p["ancora"]))
+    noti = {p['ancora'] for p in aperti}
+    for identificativo, a in ancore.items():
+        if identificativo not in scritte and identificativo not in noti:
+            aperti.append(dict(ancora=identificativo, pagina=a['pagina']+1,
+                               etichetta=a.get('etichetta', ''), tipo=a['tipo'], chiave='',
+                               motivo='Campo rilevato senza scrittura: da verificare manualmente'))
+    aperti.sort(key=lambda p: (p['pagina'], p['ancora']))
     return aperti, rifiutati
 
 
@@ -132,7 +139,7 @@ def controlla(originale, bozza, mappa: dict, scritture: dict,
         stato = ERRORI_NON_SEGNALATI
     elif non_riuscite:
         stato = NON_RIUSCITO
-    elif aperti:
+    elif aperti or not verificate:
         stato = MANCANO_DATI
     else:
         stato = COMPLETO
@@ -153,7 +160,7 @@ def controlla(originale, bozza, mappa: dict, scritture: dict,
 # timbro e firma. Quelli non mancano: non sono mai stati nostri. La promessa e'
 # l'anagrafica, e va detto quello che si e' fatto, non quello che resta.
 FRASI = {
-    COMPLETO: "Documento completato, nulla in sospeso.",
+    COMPLETO: "Scritture verificate nei campi rilevati. Controlla la bozza prima di consegnarla.",
     MANCANO_DATI: "Anagrafica scritta. Gli altri %d campi del modulo li compili tu.",
     NON_RIUSCITO: "Documento compilato, ma il programma non e' riuscito su %d punti.",
     ERRORI_NON_SEGNALATI: "Attenzione: %d scritture non risultano nel documento.",
@@ -172,6 +179,8 @@ def racconta(esito: dict) -> str:
         titolo = FRASI[stato] % len(esito["non_segnalate"])
 
     righe = [titolo, ""]
+    if not esito['verificate']:
+        righe[0] = 'Nessun dato scritto: il modulo non risulta compilato.'
     righe.append("%d campi scritti e verificati su %d campi del modulo."
                  % (len(esito["verificate"]), esito["campi_totali"]))
     for titoletto, chiave in (("Non risultano nel documento", "non_segnalate"),

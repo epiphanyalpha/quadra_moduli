@@ -24,6 +24,7 @@ Due regole che valgono per tutti i tipi:
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
+from itertools import count
 
 import fitz
 
@@ -114,10 +115,14 @@ SOGLIA_CACHE = 4            # dopo quante misure sulla stessa pagina conviene te
 DPI_CACHE = 320             # oltre questa risoluzione il ritaglio costa meno
 _conta_misure = {}
 _pagine_rese = {}
+_identita_documenti = count()
 
 
 def _chiave(pagina: fitz.Page, dpi: int):
-    return (id(pagina.parent), pagina.number, dpi, pagina.rotation)
+    documento = pagina.parent
+    if not hasattr(documento, '_quadra_misure_id'):
+        documento._quadra_misure_id = next(_identita_documenti)
+    return (documento._quadra_misure_id, pagina.number, dpi, pagina.rotation)
 
 
 def svuota_misure(pagina: fitz.Page = None):
@@ -129,9 +134,11 @@ def svuota_misure(pagina: fitz.Page = None):
         _pagine_rese.clear()
         _conta_misure.clear()
         return
-    for dpi in (DPI_MISURA, DPI_CONTROLLO, 150, 200):
-        _pagine_rese.pop(_chiave(pagina, dpi), None)
-        _conta_misure.pop(_chiave(pagina, dpi), None)
+    identita = _chiave(pagina, 0)[:2]
+    for cache in (_pagine_rese, _conta_misure):
+        for key in list(cache):
+            if key[:2] == identita:
+                cache.pop(key, None)
 
 
 def _scandisci(pm, colonne, righe, soglia: int):
@@ -179,12 +186,13 @@ def inchiostro(pagina: fitz.Page, rect, dpi: int = DPI_CONTROLLO,
         return None, 0
     k = dpi / 72.0
     chiave = _chiave(pagina, dpi)
-    _conta_misure[chiave] = _conta_misure.get(chiave, 0) + 1
+    quante = _conta_misure.get(chiave, 0) + 1
+    _conta_misure[chiave] = quante
 
     # Ad alta risoluzione la pagina intera costa piu' di tanti ritagli: MuPDF
     # rasterizza solo il ritaglio, e un A4 a 600 dpi e' 35 MB da disegnare.
     # La pagina tenuta da parte conviene solo dove il render e' leggero.
-    if dpi <= DPI_CACHE and _conta_misure[chiave] >= SOGLIA_CACHE:
+    if dpi <= DPI_CACHE and quante >= SOGLIA_CACHE:
         pm = _pagine_rese.get(chiave)
         if pm is None:
             pm = pagina.get_pixmap(dpi=dpi, colorspace=fitz.csGRAY, annots=True)

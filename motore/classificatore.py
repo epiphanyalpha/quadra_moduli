@@ -527,9 +527,29 @@ def _aree(p, presa):
         # Il tetto e' il corpo piu' diffuso della pagina, cosi' un riquadro
         # grande non produce un valore gigantesco.
         dimensione = max(5.0, min(r.height * 0.40, p.corpo * 1.3))
+        # A neighbouring cell on the same row is stronger evidence than text
+        # above the table (which can be a title or a procedure identifier).
+        sinistre = [c for c in p.celle if abs(c.riquadro.x1-r.x0) <= 1.5
+                    and min(c.riquadro.y1, r.y1)-max(c.riquadro.y0, r.y0)
+                    >= min(c.riquadro.height, r.height)*0.7]
+        etichetta = next((p.testo_in(c.riquadro) for c in sinistre
+                          if p.testo_in(c.riquadro)), '')
+        if not etichetta:
+            vicine = [line for line in p.righe if line.riquadro.x1 <= r.x0+1
+                      and r.y0 <= line.base <= r.y1
+                      and r.x0-line.riquadro.x1 <= max(r.width, 90)]
+            if vicine:
+                etichetta = max(vicine, key=lambda line: line.riquadro.x1).testo
+        parametri = {"dimensione": round(dimensione, 2)}
+        if p.bordi_inferiti:
+            parametri['griglia_ricostruita'] = any(
+                (b['asse'] == 'verticale' and min(abs(b['posizione']-r.x0), abs(b['posizione']-r.x1)) < 1.5
+                 and b['da'] <= r.y0+1 and b['a'] >= r.y1-1) or
+                (b['asse'] == 'orizzontale' and min(abs(b['posizione']-r.y0), abs(b['posizione']-r.y1)) < 1.5
+                 and b['da'] <= r.x0+1 and b['a'] >= r.x1-1) for b in p.bordi_inferiti)
         fuori.append(Ancora(_id(p.numero, "area", r.x0, r.y0), "area", p.numero, tuple(r),
-                            {"dimensione": round(dimensione, 2)},
-                            _sopra(p, r) or _a_sinistra(p, r), _contesto(p, r)))
+                            parametri, (etichetta or _a_sinistra(p, r) or _sopra(p, r))[:90],
+                            _contesto(p, r)))
         presa.prendi(r)
         visti.append(fitz.Rect(r))
     return fuori

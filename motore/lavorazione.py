@@ -50,6 +50,7 @@ FASE_DI_PASSO = {
     "guardia": "decisione",
     "correzione": "decisione",
     "esecuzione": "scrittura",
+    "scrittura": "scrittura",
     "errore": "scrittura",
     "controllo": "verifica",
     "verdetto": "verifica",
@@ -105,6 +106,13 @@ def artefatto_esistente(radice: Path, mappa: dict):
 
 
 def lavora(radice: Path, pdf, fascicolo: dict, cartella_lavoro: Path,
+           riusa=True, pertinenza_confermata=False, piano_di_prima=None, togli=()):
+    from .piano_pdf import lavora as dichiarativa
+    yield from dichiarativa(radice, pdf, fascicolo, cartella_lavoro, riusa,
+                            pertinenza_confermata, piano_di_prima, togli)
+
+
+def lavora_legacy(radice: Path, pdf, fascicolo: dict, cartella_lavoro: Path,
            riusa: bool = True, pertinenza_confermata: bool = False):
     """Genera dizionari {passo, testo, ...}. L'ultimo ha sempre 'verdetto'."""
     pdf = Path(pdf)
