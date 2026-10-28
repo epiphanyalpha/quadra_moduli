@@ -579,7 +579,8 @@ def rileggi_pagina(testo_compilato: str, indirizzi: dict, immagine=None) -> dict
     return bocciati
 
 
-def decidi_campi(testo, indirizzi, campi, chiavi, immagine=None, diagnostica=None):
+def decidi_campi(testo, indirizzi, campi, chiavi, immagine=None, diagnostica=None,
+                 _ripara=True, _errori=None):
     """A complete, declarative inventory: the model never supplies Python."""
     istruzioni = '''Leggi un modulo e associa solo dati anagrafici del fascicolo.
 Per OGNI posto restituisci una voce JSON con posto, campo, stato, soggetto, motivo.
@@ -618,6 +619,8 @@ Una data stampata come __/__/____ è un solo posto per una data intera.
 '''
     payload = dict(chiavi=list(chiavi), fonti=chiavi if isinstance(chiavi, dict) else {},
                    campi=campi, pagina=testo)
+    if _errori:
+        payload['errori_contratto_da_correggere'] = _errori
     if diagnostica is not None:
         diagnostica['ingresso'] = dict(payload, immagine_presente=bool(immagine),
                                      dati_anagrafici='fonti_con_valori')
@@ -626,7 +629,7 @@ Una data stampata come __/__/____ è un solo posto per una data intera.
     if diagnostica is not None:
         diagnostica['risposta_originale'] = risposta
     voci = _lista_risposta(risposta, 'campo')
-    result, seen = {}, set()
+    result, seen, da_riparare, errori_contratto = {}, set(), set(), []
     for voce in voci:
         posto = str(voce['posto'])
         if posto not in indirizzi:
@@ -634,6 +637,8 @@ Una data stampata come __/__/____ è un solo posto per una data intera.
         aid = indirizzi[posto]
         if aid in seen:
             result[aid] = dict(campo='', stato='dubbio', soggetto='', motivo='Decisioni duplicate sul campo')
+            da_riparare.add(aid)
+            errori_contratto.append(dict(posto=posto,motivo='Decisioni duplicate',voce=voce))
             continue
         seen.add(aid)
         campo, stato = voce['campo'], voce.get('stato')
@@ -642,6 +647,8 @@ Una data stampata come __/__/____ è un solo posto per una data intera.
         parti = voce.get('parti')
         if stato not in {'assegna', 'dato_assente', 'dubbio', 'manuale', 'non_campo'} or (campo and campo not in chiavi) or (stato == 'assegna' and (not (campo or parti) or not soggetto or not motivo)):
             campo, stato, motivo = '', 'dubbio', 'Decisione incompleta o fuori contratto'
+            da_riparare.add(aid)
+            errori_contratto.append(dict(posto=posto,motivo=motivo,voce=voce))
         result[aid] = dict(campo=campo, stato=stato, soggetto=soggetto, motivo=motivo)
         if parti is not None:
             result[aid].update(parti=parti, separatore=voce.get('separatore', ' '))
@@ -651,9 +658,32 @@ Una data stampata come __/__/____ è un solo posto per una data intera.
                 risolvi(result[aid], chiavi)
             except ProiezioneInvalida as exc:
                 result[aid].update(stato='dubbio', motivo=str(exc))
+                da_riparare.add(aid)
+                errori_contratto.append(dict(posto=posto,motivo=str(exc),voce=voce))
     for aid in indirizzi.values():
+        if aid not in result:
+            da_riparare.add(aid)
+            errori_contratto.append(dict(posto=next(n for n,a in indirizzi.items() if a==aid),
+                                         motivo='Decisione non restituita'))
         result.setdefault(aid, dict(campo='', stato='dubbio', soggetto='',
                                    motivo='Il modello non ha restituito una decisione'))
+    if diagnostica is not None:
+        diagnostica['errori_contratto'] = errori_contratto
+        diagnostica['decisioni_prima_riparazione'] = dict(result)
+    if _ripara and da_riparare:
+        from requests import RequestException
+        riparazione = {}
+        subset = {n:a for n,a in indirizzi.items() if a in da_riparare}
+        subset_campi = [c for c in campi if str(c.get('posto')) in subset]
+        try:
+            corrette = decidi_campi(testo,subset,subset_campi,chiavi,immagine,
+                                    diagnostica=riparazione,_ripara=False,_errori=errori_contratto)
+            result.update(corrette)
+        except (RispostaModelloInvalida, RequestException) as exc:
+            riparazione['errore'] = dict(tipo=type(exc).__name__,
+                stato_http=getattr(getattr(exc,'response',None),'status_code',None))
+        if diagnostica is not None:
+            diagnostica['riparazione_contratto'] = riparazione
     if diagnostica is not None:
         diagnostica['decisioni_validate'] = result
     return result

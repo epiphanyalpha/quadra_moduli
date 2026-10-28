@@ -1,6 +1,7 @@
 """PDF compilation as validated data bindings, independent of generated code."""
 import copy
 import json
+import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -242,12 +243,15 @@ def lavora(radice, pdf, fascicolo, cartella_lavoro, riusa=True,
                 decisions.update({aid: dict(stato='dubbio', campo='', soggetto='',
                     motivo='Lettura del servizio non disponibile: da verificare') for aid in page['indirizzi'].values()})
     proposte = copy.deepcopy(decisions)
+    letture_originali = {p.name:json.loads(p.read_text(encoding='utf-8'))
+                        for p in work.glob('lettura_pagina_*_tentativo_*.json')}
     salva_json(work/'proposte_iniziali.json', proposte)
     decisions.update(overrides)
     choices = {a: d['campo'] for a, d in decisions.items() if d.get('stato') == 'assegna'}
     if guasti and not choices:
         salva_json(work/'errori_servizio.json', dettagli_guasti)
-        traccia = traccia_pdf.costruisci(m, dict(diagnostica=dict(proposte=proposte)), decisions)
+        traccia = traccia_pdf.costruisci(m, dict(diagnostica=dict(proposte=proposte,
+                                        letture_originali=letture_originali)), decisions)
         salva_json(work/'traccia.json', traccia)
         codes = {g['stato_http'] for g in dettagli_guasti}
         message = ('Credito del servizio AI insufficiente: avvisa chi gestisce il servizio prima di riprovare.'
@@ -271,6 +275,7 @@ def lavora(radice, pdf, fascicolo, cartella_lavoro, riusa=True,
         decisions[aid].update(stato='dubbio', motivo=reason)
     piano = dict(identity, decisioni=decisions,
                  diagnostica=dict(proposte=proposte, rilettura=rejected, avvisi=warnings,
+                                  letture_originali=letture_originali,
                                   guasti_rilettura=errors, pagine_rilettura=review_details))
     yield dict(passo='scrittura', testo='Scrivo soltanto i dati con associazioni verificate.')
     event = esegui(pdf, m, piano, fascicolo, work, togli, origine='nuova_lettura')

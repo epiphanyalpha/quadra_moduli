@@ -404,10 +404,10 @@ def _scrivi_su_riga(pagina, ancora, valore, alzata_minima: float) -> Esito:
         return Esito(False, "valore vuoto")
     testo, eco = _senza_eco(testo, ancora.etichetta)
     dim = float(ancora.parametri.get("dimensione", 8.0))
-    minima = 5.0
+    minima = 4.5
     larghezza_utile = r.width - INSETTO_RIGA - 0.6
     while dim > minima and larghezza_testo(testo, dim) > larghezza_utile:
-        dim -= 0.25
+        dim = max(minima, dim - 0.25)
     if larghezza_testo(testo, dim) > larghezza_utile:
         return Esito(False, "il valore non entra: servono %.0f pt su %.0f"
                      % (larghezza_testo(testo, minima), larghezza_utile))

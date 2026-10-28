@@ -13,6 +13,34 @@ from motore.anagrafe import Anagrafe
 
 
 class CoperturaPDF(unittest.TestCase):
+    def test_repair_only_invalid_contract_and_keep_legitimate_doubts(self):
+        first=[dict(posto=1,campo='nome',stato='assegna',soggetto='Persona',motivo='Nome'),
+               dict(posto=2,campo='chiave_inventata',stato='assegna',soggetto='Persona',motivo='CF'),
+               dict(posto=3,campo='',stato='dubbio',soggetto='Persona',motivo='Soggetto ambiguo')]
+        repair=[dict(posto=2,campo='cf',stato='assegna',soggetto='Persona',motivo='Fonte disponibile'),
+                dict(posto=1,campo='cf',stato='assegna',soggetto='Persona',motivo='Non deve cambiare')]
+        diag={};fields=[dict(posto=n) for n in (1,2,3)]
+        with patch.object(agente,'_chiedi',side_effect=[json.dumps(first),json.dumps(repair)]) as call:
+            result=agente.decidi_campi('',{'1':'a','2':'b','3':'c'},fields,
+                                      {'nome':'Ada','cf':'ABC'},diagnostica=diag)
+        self.assertEqual(call.call_count,2)
+        self.assertEqual(result['a']['campo'],'nome')
+        self.assertEqual(result['b']['campo'],'cf')
+        self.assertEqual(result['c']['motivo'],'Soggetto ambiguo')
+        self.assertEqual(diag['riparazione_contratto']['ingresso']['campi'],[dict(posto=2)])
+
+    def test_line_accepts_documented_text_just_below_five_points(self):
+        from riusare import strumenti_documento as sd
+        value='Servizi generali per la regione e la provincia'
+        width=sd.larghezza_testo(value,4.8)+sd.INSETTO_RIGA+.6
+        with fitz.open() as doc:
+            page=doc.new_page()
+            anchor=sd.Ancora.da_dict(dict(id='a',pagina=0,tipo='riempimento',
+                rect=[40,60,40+width,80],etichetta='Ente',parametri=dict(dimensione=8,base=80)))
+            result=sd.scrivi(page,anchor,value)
+            self.assertTrue(result.ok,result.motivo)
+            self.assertEqual(page.get_text().strip(),value)
+
     def test_exact_parts_and_composition_with_source_provenance(self):
         p={'strada':'Via Esempio','numero':'12/B','persone':'Ada Verdi - direttrice; Leo Blu - socio'}
         d=dict(parti=[{'campo':'strada'},{'campo':'numero'}])

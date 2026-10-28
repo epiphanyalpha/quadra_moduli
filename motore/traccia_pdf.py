@@ -51,6 +51,7 @@ def costruisci(mappa, piano, decisioni, scritture=(), verifica=None, origine='nu
                           fase=fase, esito=esito, motivo=motivo,
                           chiave=d.get('campo', '')))
     return dict(versione=2, origine=origine, ingresso_ai='fonti_con_valori',
+                letture_originali=copy.deepcopy(storia.get('letture_originali',{})),
                 guasti_rilettura=copy.deepcopy(storia.get('guasti_rilettura',[])),
                 pagine_rilettura=copy.deepcopy(storia.get('pagine_rilettura',{})),
                 proposta_storica=origine != 'nuova_lettura',
