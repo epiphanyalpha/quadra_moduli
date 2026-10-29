@@ -437,6 +437,18 @@ def _indicazioni(memoria: dict, indirizzi: dict) -> str:
 
 # ------------------------------------------------------------- il lavoro
 
+# Sezioni che una regola chiara esclude per un'impresa italiana: le istruzioni
+# lo dicono al modello, ma sui 20 moduli di gara del 29/10 le ha compilate due
+# volte su due. Una regola certa si mette nel codice, non si chiede.
+ESCLUSE = re.compile(r"transfrontalier|non stabilit\w* in italia")
+
+
+def sezione_esclusa(testo_riga: str):
+    if ESCLUSE.search(_norm(testo_riga)):
+        return "sezione riservata agli operatori economici transfrontalieri"
+    return None
+
+
 def _testo_prima(mappa, ancora) -> str:
     """Il testo STAMPATO subito prima del posto: e' quello che legge chi compila.
 
@@ -465,7 +477,8 @@ def _accetta(voci, indirizzi, by_id, profilo, mappa, scelte, scarti, chiave_valo
         if not valore:
             scelte.pop(aid, None)
             continue
-        motivo = (controlla_provenienza(valore, voce.get("fonti"), profilo) or
+        motivo = (sezione_esclusa(dict(mappa["righe"]).get(by_id[aid]["paragrafo"], "")) or
+                  controlla_provenienza(valore, voce.get("fonti"), profilo) or
                   controlla_formato(_testo_prima(mappa, by_id[aid]), valore))
         if motivo:
             scarti.append(dict(posto=posto, ancora=aid, valore=valore, motivo=motivo))

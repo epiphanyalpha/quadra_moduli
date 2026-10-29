@@ -144,6 +144,9 @@ class EspertoTests(unittest.TestCase):
         self.assertIsNotNone(ce.controlla_formato("C.A.P.", "Imperia"))
         self.assertIsNone(ce.controlla_formato("con sede in Imperia (", "IM"))
         self.assertIsNotNone(ce.controlla_formato("PEC", "aurora.it"))
+        self.assertIsNotNone(ce.sezione_esclusa(
+            "[per gli operatori economici transfrontalieri] INDICA il seguente domicilio fiscale"))
+        self.assertIsNone(ce.sezione_esclusa("con sede legale in"))
 
 
 if __name__ == "__main__":
