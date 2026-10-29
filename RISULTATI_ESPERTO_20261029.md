@@ -84,3 +84,45 @@ la geometria delle righe fitte e le caselle. Prossimo passo: i PDF che Bianca
 ha dovuto correggere, e la prova di un rilevatore di campi dedicato
 (CommonForms/FFDNet) se entra nella memoria del piano Render.
 Costo della prova PDF: circa $2.
+
+## Pubblicazione Word (29/10, sera)
+
+`claude/compila-come-esperto` 1ac298d spinto su GitHub `main` su richiesta di
+Francesco. Render pubblica da solo; i Word ora passano da Sonnet 5.5.
+
+## PDF: doppia lettura (Gemini + Sonnet), misurata
+
+Codice: `QUADRA_PDF_SECONDA_LETTURA=<modello>` (spenta per difetto). Le due
+letture corrono in parallelo; si confronta il valore che finirebbe scritto, e
+lo stesso dato scritto in un altro modo ("Genova il 20/06/1976" / "Genova,
+20/06/1976") non conta come disaccordo. Disaccordo: resta scritta la prima, e
+l'app la mostra con l'altra proposta e il bottone "Usa l'altra". Dato trovato
+solo dalla seconda: proposta da confermare, mai scritta da sola.
+
+Misura con riferimento vero: il modulo di gara che Bianca ha compilato a mano
+(`_Lotto_1_04_Dichiaraz-OE`, 49 campi di testo e 17 caselle), rifatto
+dall'app sul modulo vuoto con l'anagrafica finta e confrontato voce per voce.
+Le due letture concordano su tutto. 38 campi scritti e 5 proposte, tutti
+giusti tranne ATECO (scritto l'elenco intero invece del codice prevalente).
+Mancano soprattutto 15 caselle su 17 e i dati che l'anagrafica non ha
+(oggetto, Agenzia Entrate, Ispettorato, categorie white list). Sono errori
+che i due modelli fanno insieme, quindi la doppia lettura non li vede.
+
+Altri 4 PDF: Desio 13 scritti e 0 segnalazioni, VT_1 17 e 0, Taggia 0 e 0,
+Sanluri 46 scritti e 4 proposte in piu' dalla seconda lettura (qualifica del
+firmatario tre volte, organismo SOA), probabilmente giuste. Sui 5 PDF di prima:
+un errore vero preso (la scadenza SOA nella riga della data di rilascio) su
+circa 6 segnalazioni.
+
+Costo: la lettura Sonnet costa da 5 a 10 volte quella Gemini (0,04-0,65 $ a
+PDF contro 0,02-0,08 $). Conclusione: funziona come previsto, ma segnala poco
+perche' gli errori veri sono comuni ai due modelli. Lasciata spenta.
+
+## PDF firmati dall'ente: ora si compilano
+
+22 moduli dell'archivio su 340, fra cui quelli di gara di Bianca (Lotto 1/2),
+portano la firma digitale di chi li ha pubblicati, e l'app li rifiutava come
+"gia' firmati". Bianca infatti li ha compilati a mano. Ora si scrive in coda al
+file, come fa Acrobat: i byte firmati restano identici (provato su tutti i 22;
+sul Lotto 1 vero 38 campi, gli stessi del modulo senza firma). L'app avvisa che
+il modulo va poi firmato da chi compila. Commit 02167ef, non ancora pubblicato.
