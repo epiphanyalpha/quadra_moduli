@@ -579,11 +579,35 @@ with pagina_moduli:
     if verdetto:
         contesto_usato = verdetto.get('contesto')
         st.caption('Dati usati per questa bozza: '+contesti_pdf.get(contesto_usato, 'solo anagrafica dell’impresa'))
+        if verdetto.get('firma_preesistente'):
+            st.info('Il modulo ricevuto porta già una firma digitale, di solito dell’ente che l’ha pubblicato. '
+                    'L’ho lasciata intatta: i dati sono aggiunti in coda al file, come fa Acrobat. '
+                    'Il modulo compilato lo firmi tu come sempre. Se invece la firma è la tua, '
+                    'ricompila partendo dal modulo non firmato.')
         if verdetto.get('allegati'):
             st.info('%d valori lunghi sono riportati integralmente in allegato, '
                     'con un richiamo nel campo del modulo.' % len(verdetto['allegati']))
         if verdetto.get('domande_campi'):
             st.info('%d campi attendono una risposta in «Completiamo il modulo».' % len(verdetto['domande_campi']))
+        # Due modelli hanno letto il modulo: dove non concordano si concentrano
+        # gli errori. Il valore della prima lettura e' scritto; qui si guarda.
+        discordi = verdetto.get('letture_discordi') or []
+        if discordi and verdetto.get('piano') and st.session_state.artefatto:
+            st.warning('**Controlla questi %d campi:** le due letture del modulo non concordano. '
+                       'Ho scritto la prima proposta; se è sbagliata usa l’altra o toglilo '
+                       'in «Rivedi e togli quello che non va».' % len(discordi))
+            mappa_dl = json.loads((Path(st.session_state.artefatto)/'mappa.json').read_text(encoding='utf-8'))
+            catalogo_dl = fonti_pdf.fonti(fascicolo, verdetto['piano'].get('contesto'))
+            for r in discordi:
+                testo_dl, bottone_dl = st.columns([5, 1])
+                testo_dl.caption('pagina %d — %s — scritto «%s»; l’altra lettura: %s'
+                                 % (r['pagina'], str(r['etichetta'])[:90], r['scritto'],
+                                    '«%s»' % r['alternativa'] if r['sostituibile'] else r['alternativa']))
+                if r['sostituibile'] and bottone_dl.button('Usa l’altra', key='altra_lettura_'+r['ancora']):
+                    piano = revisione_pdf.rispondi(verdetto['piano'], mappa_dl, catalogo_dl,
+                                                   r['ancora'], 'alternativa')
+                    _compila(Path(st.session_state.modulo), confermata=True, piano=piano)
+                    st.rerun()
         st.divider()
         testa = {controllo.COMPLETO: st.success,
                  controllo.MANCANO_DATI: st.info,
@@ -711,6 +735,7 @@ with pagina_moduli:
                 Path(st.session_state.bozza).stat().st_mtime)
 
             da_togliere = []
+            discordi_ids = {r["ancora"] for r in verdetto.get("letture_discordi") or []}
             pagina_mostrata = None
             for numero, r in enumerate(verdetto["verificate"], 1):
                 if r["pagina"] != pagina_mostrata:
@@ -726,6 +751,8 @@ with pagina_moduli:
                         st.image(immagine, use_container_width=True)
                     else:
                         st.caption(r.get("riga") or r["etichetta"] or r["ancora"])
+                    if r["ancora"] in discordi_ids:
+                        st.caption("⚠ le due letture non concordano su questo campo")
             if st.button("Rifai la bozza senza i %d campi spuntati" % len(da_togliere),
                          disabled=not da_togliere or not st.session_state.artefatto):
                 if verdetto.get('piano'):

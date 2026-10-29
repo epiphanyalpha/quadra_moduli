@@ -3,6 +3,8 @@ import contextvars
 import copy
 import json
 import os
+import re
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -33,7 +35,14 @@ def _senza_guasti(piano):
 
 def _scrivi(originale, mappa, valori, cartella):
     rows = []
-    with fitz.open(originale) as doc:
+    bozza = cartella / 'bozza.pdf'
+    # Un modulo con una firma digitale (di solito dell'ente che l'ha pubblicato)
+    # si compila in coda al file, come fa Acrobat: i byte firmati restano
+    # identici e la firma resta verificabile sulla sua versione.
+    in_coda = firmato(originale)
+    if in_coda:
+        shutil.copyfile(originale, bozza)
+    with fitz.open(bozza if in_coda else originale) as doc:
         with PagineDiritte(doc) as diritto:
             for raw in mappa['ancore']:
                 aid = raw['id']
@@ -78,8 +87,10 @@ def _scrivi(originale, mappa, valori, cartella):
                     pagina=doc.new_page();y=50
                 pagina.insert_text((45,y),linea,fontsize=10);y+=15
             row['pagina_allegato_fine']=len(doc)
-        bozza = cartella / 'bozza.pdf'
-        doc.save(bozza)
+        if in_coda:
+            doc.saveIncr()
+        else:
+            doc.save(bozza)
     return bozza, dict(scritture=rows)
 
 
@@ -150,6 +161,16 @@ def esegui(originale, mappa, piano, fascicolo, cartella, togli=(), origine='pian
     verdict['copertura_completa_certificata'] = False
     verdict['avvisi_rilettura'] = piano.get('diagnostica',{}).get('avvisi',[])
     verdict['allegati'] = [s for s in writes['scritture'] if s.get('valore_completo')]
+    verdict['firma_preesistente'] = firmato(originale)
+    verdict['letture_discordi'] = [dict(ancora=aid, pagina=by_id[aid]['pagina']+1,
+        etichetta=by_id[aid].get('etichetta') or by_id[aid].get('contesto') or aid,
+        scritto=revisione_pdf.descrivi(valori[aid]),
+        alternativa=revisione_pdf.descrivi(d['seconda_lettura']['valore'])
+                    if d['seconda_lettura']['valore'] not in (None, False) else 'lasciarlo vuoto',
+        sostituibile=d['seconda_lettura']['valore'] is not None
+                     and (d['seconda_lettura'].get('decisione') or {}).get('stato') == 'assegna')
+        for aid, d in decisions.items() if d.get('seconda_lettura') and aid in valori
+        and d.get('origine') != 'utente']
     verdict['traccia_campi'] = traccia
     salva_json(cartella/'traccia.json', traccia)
     salva_json(cartella/'mappa.json', mappa)
@@ -213,6 +234,58 @@ def _ripara_scritture(pdf, mappa, piano, evento, fascicolo, catalogo, images, ca
     revisione_pdf.richiedi_conferme(mappa, plan['decisioni'], plan.get('contesto'), ambito=eligible)
     plan.setdefault('diagnostica', {})['riparazione_scrittura'] = report
     return esegui(pdf, mappa, plan, fascicolo, nuova_cartella(cartella_lavoro), origine='riparazione_scrittura')
+
+
+COLLA = {'il', 'a', 'in', 'di', 'del', 'della', 'e', 'nato', 'nata', 'nato/a', '-', '.', 'c.f.', 'cf'}
+
+
+def confronta_letture(mappa, prima, seconda, catalogo, pagine_guaste=()):
+    """Mette a confronto le due letture campo per campo, sul valore che finirebbe scritto.
+
+    Non vota e non sceglie: dove i due modelli non concordano il valore della
+    prima resta scritto ma porta con se' l'altra proposta, da mostrare a chi
+    compila; dove solo la seconda trova un dato, quel dato diventa una proposta
+    da confermare, mai una scrittura. Modifica `prima` sul posto.
+    """
+    by_id = {a['id']: a for a in mappa['ancore']}
+    lette = {aid for p in mappa['rese'] if p['pagina'] not in pagine_guaste
+             for aid in p['indirizzi'].values()}
+
+    def scritto(d, a):
+        if not d or d.get('stato') != 'assegna':
+            return False if revisione_pdf.selezione(a) else None
+        try:
+            return revisione_pdf.valore(d, catalogo, a)
+        except ProiezioneInvalida:
+            return False if revisione_pdf.selezione(a) else None
+
+    def uguali(x, y):
+        # Lo stesso dato scritto in un altro modo non e' un disaccordo:
+        # "Genova il 20/06/1976" e "Genova, 20/06/1976", "IM" accanto al comune.
+        if not isinstance(x, str) or not isinstance(y, str):
+            return x == y
+        parole = lambda v: set(re.findall(r'[\w/@.-]+', v.casefold().replace(',', ' '))) - COLLA
+        px, py = parole(x), parole(y)
+        return bool(px) and bool(py) and (px <= py or py <= px)
+    rapporto = dict(confrontati=0, discordi=[], solo_seconda=[])
+    for aid in sorted(lette):
+        a, d, altra = by_id.get(aid), prima.get(aid), seconda.get(aid)
+        if a is None or d is None or altra is None or not revisione_pdf.scrivibile(a):
+            continue
+        rapporto['confrontati'] += 1
+        va, vb = scritto(d, a), scritto(altra, a)
+        if uguali(va, vb):
+            continue
+        if va is None or va is False:
+            prima[aid] = dict(altra, stato='da_confermare', origine='seconda_lettura',
+                              seconda_lettura=dict(valore=None, decisione=d),
+                              motivo='Lo propone solo la seconda lettura: conferma se è giusto. '
+                                     + str(altra.get('motivo', '')))
+            rapporto['solo_seconda'].append(aid)
+        else:
+            d['seconda_lettura'] = dict(valore=vb, decisione=altra)
+            rapporto['discordi'].append(aid)
+    return rapporto
 
 
 PAGINE_REVISIONE = 6
@@ -298,8 +371,7 @@ def _lavora(radice, pdf, fascicolo, cartella_lavoro, riusa=True,
             pertinenza_confermata=False, piano_di_prima=None, togli=(), contesto=None):
     pdf = Path(pdf)
     if firmato(pdf):
-        yield dict(passo='rifiuto', testo='Il PDF e gia firmato: usa il modulo originale non firmato.')
-        return
+        yield dict(passo='misura', testo='Il modulo porta una firma digitale: la lascio intatta e aggiungo i dati in coda al file.')
     work = nuova_cartella(cartella_lavoro)
     if piano_di_prima is not None:
         contesto = piano_di_prima.get('contesto')
@@ -364,7 +436,8 @@ def _lavora(radice, pdf, fascicolo, cartella_lavoro, riusa=True,
     yield dict(passo='valori', testo='Associo i dati ai campi, distinguendo soggetti e sezioni.')
     images = {i+1: image for i, image in enumerate(agente.immagini(pdf))}
     decisions, guasti, dettagli_guasti = {}, [], []
-    def decide(page):
+    seconda = agente.config_seconda_lettura()
+    def decide(page, prefisso='lettura'):
         fields = [dict(posto=n, **{k: a.get(k) for k in ('etichetta', 'tipo', 'rect', 'contesto')})
                   for n, aid in page['indirizzi'].items() for a in m['ancore'] if a['id'] == aid]
         for f in fields:
@@ -385,10 +458,22 @@ def _lavora(radice, pdf, fascicolo, cartella_lavoro, riusa=True,
                 diagnostica['errore'] = dict(tipo=type(exc).__name__)
                 raise
             finally:
-                salva_json(work/f'lettura_pagina_{page["pagina"]}_tentativo_{attempt+1}.json', diagnostica)
-    with ThreadPoolExecutor(max_workers=3) as pool:
+                salva_json(work/f'{prefisso}_pagina_{page["pagina"]}_tentativo_{attempt+1}.json', diagnostica)
+    def decide_secondo(page):
+        with agente.usando(seconda):
+            return decide(page, 'seconda_lettura')
+    seconde, guasti_secondi = {}, []
+    with ThreadPoolExecutor(max_workers=6 if seconda else 3) as pool:
         # Il modello in uso deve seguire il lavoro nei thread: un contesto per pagina.
         jobs = [(p, pool.submit(contextvars.copy_context().run, decide, p)) for p in m['rese']]
+        # La seconda lettura corre insieme alla prima: non allunga l'attesa.
+        jobs_secondi = [(p, pool.submit(contextvars.copy_context().run, decide_secondo, p))
+                        for p in m['rese']] if seconda else []
+        for page, job in jobs_secondi:
+            try:
+                seconde.update(job.result())
+            except Exception as exc:  # noqa: BLE001 - la seconda lettura non ferma mai la prima
+                guasti_secondi.append(dict(pagina=page['pagina'], errore=type(exc).__name__))
         for page, job in jobs:
             try:
                 decisions.update(job.result())
@@ -402,6 +487,13 @@ def _lavora(radice, pdf, fascicolo, cartella_lavoro, riusa=True,
     letture_originali = {p.name:json.loads(p.read_text(encoding='utf-8'))
                         for p in work.glob('lettura_pagina_*_tentativo_*.json')}
     salva_json(work/'proposte_iniziali.json', proposte)
+    doppia = None
+    if seconda:
+        salva_json(work/'proposte_seconda_lettura.json', seconde)
+        doppia = confronta_letture(m, decisions, seconde, catalogo,
+                                   set(guasti) | {g['pagina'] for g in guasti_secondi})
+        doppia.update(modello=seconda[2], guasti=guasti_secondi)
+        salva_json(work/'doppia_lettura.json', doppia)
     decisions.update(overrides)
     choices = {a: d['campo'] for a, d in decisions.items() if d.get('stato') == 'assegna'}
     if guasti and not choices:
@@ -435,6 +527,8 @@ def _lavora(radice, pdf, fascicolo, cartella_lavoro, riusa=True,
                  diagnostica=dict(proposte=proposte, rilettura=rejected, avvisi=warnings,
                                   letture_originali=letture_originali,
                                   guasti_rilettura=errors, pagine_rilettura=review_details))
+    if doppia is not None:
+        piano['diagnostica']['doppia_lettura'] = doppia
     yield dict(passo='scrittura', testo='Scrivo soltanto i dati con associazioni verificate.')
     event = esegui(pdf, m, piano, fascicolo, work, togli, origine='nuova_lettura')
     if event['verdetto']['scritture_escluse']:

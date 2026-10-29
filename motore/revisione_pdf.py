@@ -114,6 +114,12 @@ def rispondi(piano, mappa, fonti, aid, azione, *, campo=None, testo=None):
                  valore_utente=(azione == 'si') if azione != 'testo' else testo,
                  soggetto='Scelto dall’utente', motivo='Risposta esplicita per questo modulo')
         valore(d, fonti, a)
+    elif azione == 'alternativa':
+        altra = (d.get('seconda_lettura') or {}).get('decisione')
+        if not altra or altra.get('stato') != 'assegna':
+            raise ValueError('Nessuna altra proposta per questo campo')
+        d = dict(copy.deepcopy(altra), origine='utente', motivo='Scelta la proposta della seconda lettura')
+        valore(d, fonti, a)
     elif azione in ('non_applicabile', 'manuale'):
         d = dict(stato='non_campo' if azione == 'non_applicabile' else 'manuale',
                  origine='utente', campo='', soggetto='Scelto dall’utente',

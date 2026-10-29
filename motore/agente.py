@@ -595,6 +595,22 @@ def config_pdf():
     return (base, chiave, modello, int(os.environ.get("QUADRA_PDF_TETTO_GETTONI", "32768")))
 
 
+def config_seconda_lettura():
+    """Il secondo modello che legge i PDF accanto al primo; None = una lettura sola.
+
+    Non decide al posto del primo: dove i due non concordano si concentrano gli
+    errori, e li' si chiede a chi compila di guardare (QUADRA_PDF_SECONDA_LETTURA).
+    """
+    modello = os.environ.get("QUADRA_PDF_SECONDA_LETTURA", "").strip()
+    if not modello:
+        return None
+    cw = config_word()
+    base, chiave = (cw[0], cw[1]) if cw else (BASE, CHIAVE)
+    if not (base and chiave):
+        return None
+    return (base, chiave, modello, int(os.environ.get("QUADRA_PDF_TETTO_GETTONI", "32768")))
+
+
 REVISIONE_PAGINA_COMPILATA = '''
 REVISIONE DELLA PAGINA GIA' COMPILATA. L'immagine mostra la pagina con i valori
 GIA' SCRITTI. Ogni posto elencato in errori_contratto_da_correggere porta la
