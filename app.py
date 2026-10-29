@@ -31,7 +31,7 @@ import streamlit as st
 import esecuzione
 from motore import (accesso, agente, compilatore, controllo, fascicoli,
                     lavorazione, lavorazione_word, scheda, soggetti, word)
-from motore import lavori, fonti_pdf, revisione_pdf
+from motore import lavori, fonti_pdf, piano_pdf, revisione_pdf
 
 RADICE = Path(__file__).resolve().parent
 
@@ -588,7 +588,22 @@ with pagina_moduli:
             st.info('%d valori lunghi sono riportati integralmente in allegato, '
                     'con un richiamo nel campo del modulo.' % len(verdetto['allegati']))
         if verdetto.get('domande_campi'):
-            st.info('%d campi attendono una risposta in «Completiamo il modulo».' % len(verdetto['domande_campi']))
+            if piano_pdf.chiede_conferme():
+                st.info('%d campi attendono una risposta in «Completiamo il modulo».' % len(verdetto['domande_campi']))
+            else:
+                st.caption('%d spazi sono rimasti vuoti: se vuoi, puoi completarli in «Completiamo il modulo».'
+                           % len(verdetto['domande_campi']))
+        # Compila e basta: anche caselle e campi incerti sono scritti. Qui si
+        # dice quali, perche' sono quelli da guardare prima di firmare.
+        controllare = verdetto.get('da_controllare') or []
+        if controllare:
+            st.warning('**Ho compilato anche %d campi da controllare prima di firmare** '
+                       '(caselle, persone, dubbi della rilettura). Se uno è sbagliato toglilo '
+                       'in «Rivedi e togli quello che non va».' % len(controllare))
+            with st.expander('Vedi i %d campi da controllare' % len(controllare)):
+                for r in controllare:
+                    st.caption('pagina %d — %s — scritto «%s» — %s'
+                               % (r['pagina'], str(r['etichetta'])[:90], r['scritto'], str(r['motivo'])[:160]))
         # Due modelli hanno letto il modulo: dove non concordano si concentrano
         # gli errori. Il valore della prima lettura e' scritto; qui si guarda.
         discordi = verdetto.get('letture_discordi') or []
@@ -736,6 +751,7 @@ with pagina_moduli:
 
             da_togliere = []
             discordi_ids = {r["ancora"] for r in verdetto.get("letture_discordi") or []}
+            controllare_ids = {r["ancora"]: r["motivo"] for r in verdetto.get("da_controllare") or []}
             pagina_mostrata = None
             for numero, r in enumerate(verdetto["verificate"], 1):
                 if r["pagina"] != pagina_mostrata:
@@ -753,6 +769,8 @@ with pagina_moduli:
                         st.caption(r.get("riga") or r["etichetta"] or r["ancora"])
                     if r["ancora"] in discordi_ids:
                         st.caption("⚠ le due letture non concordano su questo campo")
+                    if r["ancora"] in controllare_ids:
+                        st.caption("⚠ da controllare: " + str(controllare_ids[r["ancora"]])[:160])
             if st.button("Rifai la bozza senza i %d campi spuntati" % len(da_togliere),
                          disabled=not da_togliere or not st.session_state.artefatto):
                 if verdetto.get('piano'):
@@ -784,7 +802,8 @@ with pagina_moduli:
                     st.rerun()
 
         if verdetto.get('piano'):
-            with st.expander('Completiamo il modulo', expanded=bool(verdetto.get('domande_campi'))):
+            with st.expander('Completiamo il modulo', expanded=bool(verdetto.get('domande_campi'))
+                             and piano_pdf.chiede_conferme()):
                 mapping = json.loads((Path(st.session_state.artefatto)/'mappa.json').read_text(encoding='utf-8'))
                 catalogo = fonti_pdf.fonti(fascicolo, verdetto['piano'].get('contesto'))
                 domande = {d['ancora']:d for d in verdetto.get('domande_campi', [])}

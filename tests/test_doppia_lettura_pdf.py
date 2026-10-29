@@ -22,6 +22,10 @@ class DoppiaLettura(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.rete = patch.object(agente, '_chiedi', side_effect=AssertionError('Unexpected AI call'))
         self.rete.start()
+        # Questi controlli riguardano la modalita' che chiede conferma prima di scrivere.
+        self.conferme = patch.dict(os.environ, {'QUADRA_PDF_CONFERME': 'chiedi'})
+        self.conferme.start()
+        self.addCleanup(self.conferme.stop)
         self.profilo = dict(profilo=dict(ragione_sociale='Impresa Alfa', nome='Ada Verdi'))
         self.source = self.root/'source.pdf'
         with fitz.open() as d:

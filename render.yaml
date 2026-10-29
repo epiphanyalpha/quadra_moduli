@@ -70,6 +70,11 @@ services:
         value: esperto
       - key: QUADRA_ESPERTO_MODELLO
         value: anthropic/claude-sonnet-5.5
+      # PDF: "scrivi" compila anche caselle e campi incerti e li segna da
+      # controllare (come la versione di settembre, che non chiedeva niente);
+      # "chiedi" li lascia vuoti finche' chi compila non conferma.
+      - key: QUADRA_PDF_CONFERME
+        value: scrivi
       # Chi puo' entrare: "codice:Nome, codice:Nome". Senza questa, l'app
       # su un server si rifiuta di aprirsi - e' la protezione contro la
       # dimenticanza, non contro l'attacco.

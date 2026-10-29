@@ -22,6 +22,10 @@ class PraticaRevisionePDF(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.network = patch.object(agente, '_chiedi', side_effect=AssertionError('Unexpected AI call'))
         self.network.start()
+        # Questi controlli riguardano la modalita' che chiede conferma prima di scrivere.
+        self.conferme = patch.dict(os.environ, {'QUADRA_PDF_CONFERME': 'chiedi'})
+        self.conferme.start()
+        self.addCleanup(self.conferme.stop)
         self.profile = dict(profilo=dict(ragione_sociale='Impresa Alfa', nome='Ada Verdi'),
             lavoro_corrente=dict(proprietario='Committente Beta', superficie=18, autorizzato=False),
             scenari=dict(altro=dict(proprietario='Committente Gamma')))

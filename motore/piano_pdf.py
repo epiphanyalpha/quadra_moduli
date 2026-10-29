@@ -94,6 +94,11 @@ def _scrivi(originale, mappa, valori, cartella):
     return bozza, dict(scritture=rows)
 
 
+def chiede_conferme():
+    """QUADRA_PDF_CONFERME=chiedi lascia vuoti i campi da confermare; per difetto si scrivono."""
+    return os.environ.get('QUADRA_PDF_CONFERME', 'scrivi').strip().lower() == 'chiedi'
+
+
 def esegui(originale, mappa, piano, fascicolo, cartella, togli=(), origine='piano_ricevuto'):
     """Reapply a reviewed plan only to its exact source, profile and map."""
     if (piano.get('versione') != VERSIONE or piano.get('impronta') != impronta(originale)
@@ -103,7 +108,21 @@ def esegui(originale, mappa, piano, fascicolo, cartella, togli=(), origine='pian
     decisions = copy.deepcopy(piano['decisioni'])
     profilo = fascicolo.get('profilo', {})
     catalogo = fonti(fascicolo, piano.get('contesto'))
-    revisione_pdf.richiedi_conferme(mappa, decisions, piano.get('contesto'))
+    chiedi = chiede_conferme()
+    if chiedi:
+        revisione_pdf.richiedi_conferme(mappa, decisions, piano.get('contesto'))
+    else:
+        # Compila e basta: quello che chiederebbe conferma si scrive comunque e
+        # resta segnato "da controllare", con il motivo, per chi rilegge.
+        prova = copy.deepcopy(decisions)
+        revisione_pdf.richiedi_conferme(mappa, prova, piano.get('contesto'))
+        for aid, d in decisions.items():
+            if d.get('origine') == 'utente':
+                continue
+            if d.get('stato') == 'da_confermare' or (d.get('stato') == 'assegna'
+                                                      and prova[aid].get('stato') == 'da_confermare'):
+                d.update(stato='assegna', da_controllare=d.get('da_controllare')
+                         or prova[aid].get('motivo') or d.get('motivo', ''))
     esclusi = set(togli)
     valori = {}
     by_id = {a['id']: a for a in mappa['ancore']}
@@ -117,7 +136,7 @@ def esegui(originale, mappa, piano, fascicolo, cartella, togli=(), origine='pian
         a = by_id[aid]
         if d.get('stato') == 'assegna':
             try:
-                if revisione_pdf.selezione(a) and d.get('origine') != 'utente':
+                if chiedi and revisione_pdf.selezione(a) and d.get('origine') != 'utente':
                     d.update(stato='da_confermare', motivo='Conferma la scelta prima di inserirla')
                     continue
                 valori[aid] = revisione_pdf.valore(d, catalogo, a)
@@ -162,6 +181,11 @@ def esegui(originale, mappa, piano, fascicolo, cartella, togli=(), origine='pian
     verdict['avvisi_rilettura'] = piano.get('diagnostica',{}).get('avvisi',[])
     verdict['allegati'] = [s for s in writes['scritture'] if s.get('valore_completo')]
     verdict['firma_preesistente'] = firmato(originale)
+    verdict['da_controllare'] = [dict(ancora=aid, pagina=by_id[aid]['pagina']+1,
+        etichetta=by_id[aid].get('etichetta') or by_id[aid].get('contesto') or aid,
+        scritto=revisione_pdf.descrivi(valori[aid]), motivo=d['da_controllare'])
+        for aid, d in decisions.items() if d.get('da_controllare') and aid in valori
+        and d.get('origine') != 'utente']
     verdict['letture_discordi'] = [dict(ancora=aid, pagina=by_id[aid]['pagina']+1,
         etichetta=by_id[aid].get('etichetta') or by_id[aid].get('contesto') or aid,
         scritto=revisione_pdf.descrivi(valori[aid]),

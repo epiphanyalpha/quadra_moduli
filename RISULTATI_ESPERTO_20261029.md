@@ -126,3 +126,15 @@ portano la firma digitale di chi li ha pubblicati, e l'app li rifiutava come
 file, come fa Acrobat: i byte firmati restano identici (provato su tutti i 22;
 sul Lotto 1 vero 38 campi, gli stessi del modulo senza firma). L'app avvisa che
 il modulo va poi firmato da chi compila. Commit 02167ef, non ancora pubblicato.
+
+## PDF: di nuovo "compila e basta" (29/10, sera)
+
+Su richiesta di Francesco: dal 28/10 il motore PDF di Codex lasciava vuoti, in
+attesa di conferma, caselle, campi con soggetto incerto e dubbi della
+rilettura. Ora (`QUADRA_PDF_CONFERME=scrivi`, anche il valore per difetto) li
+scrive e li elenca come "da controllare prima di firmare", con il motivo; si
+tolgono come ogni altro campo. `chiedi` torna al comportamento di Codex.
+Sul modulo di gara vero di Bianca (firmato dall'ente): 43 campi scritti invece
+di 38, i 5 in piu' segnati da controllare e giusti. Restano a Bianca le caselle
+delle dichiarazioni: il modello non le decide (0 su 17 di quelle che lei ha
+spuntato), ne' prima ne' ora.
