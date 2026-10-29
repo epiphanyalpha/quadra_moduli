@@ -63,6 +63,13 @@ services:
         value: google/gemini-3.8-flash
       - key: QUADRA_WORD_CHIAVE
         sync: false            # una chiave OpenRouter nuova, solo per questo servizio
+      # Compilazione "esperta" dei Word (compilatore_esperto.py): il modello
+      # vede i valori dell'anagrafica, compone, giustifica con le fonti e
+      # rilegge il modulo compilato. "classico" torna al percorso precedente.
+      - key: QUADRA_WORD_MODO
+        value: esperto
+      - key: QUADRA_ESPERTO_MODELLO
+        value: anthropic/claude-sonnet-5.5
       # Chi puo' entrare: "codice:Nome, codice:Nome". Senza questa, l'app
       # su un server si rifiuta di aprirsi - e' la protezione contro la
       # dimenticanza, non contro l'attacco.

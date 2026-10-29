@@ -17,7 +17,7 @@ import uuid
 from pathlib import Path
 from requests import RequestException
 
-from motore import agente, soggetti, word
+from motore import agente, compilatore_esperto, soggetti, word
 from motore.anagrafe import Anagrafe
 from motore.lavori import nuova_cartella
 
@@ -182,7 +182,53 @@ def _lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
     decisioni_ai = {}
     prima_rilettura = {}
 
-    if scelte_di_prima is not None:
+    # Il percorso "esperto" (compilatore_esperto): il modello vede i valori,
+    # puo' comporli, li giustifica con le fonti, rilegge il modulo compilato.
+    # Si accende con QUADRA_WORD_MODO=esperto; se il servizio non risponde si
+    # torna al percorso di sempre invece di perdere il modulo.
+    modo_esperto = compilatore_esperto.attivo()
+    memoria_moduli = Path(cartella_lavoro).parent.parent / "memoria_moduli"
+    esito_esperto = None
+    if modo_esperto and scelte_di_prima is not None:
+        yield {"passo": "riuso",
+               "testo": "Riuso la decisione gia' presa su questo modulo: non "
+                        "richiamo il modello, cosi' togliere un campo toglie "
+                        "quel campo e non muove gli altri."}
+        compilatore_esperto.ricrea_aggiunte(mappa, scelte_di_prima)
+        esistenti = {a["id"] for a in mappa["ancore"]}
+        chiavi_scelte = {a: s for a, s in scelte_di_prima.items()
+                         if a in esistenti and a not in spente}
+        rimasti = compilatore_esperto.valori_da_scelte(
+            {a: s for a, s in chiavi_scelte.items() if a not in togli}, profilo)
+        # Chi toglie o corregge un campo insegna qualcosa su QUESTO modulo:
+        # resta legato alla sua impronta e la prossima volta vale gia'.
+        compilatore_esperto.ricorda(
+            memoria_moduli, compilatore_esperto.impronta_modulo(mappa),
+            {a["id"]: a["etichetta"] for a in mappa["ancore"]},
+            tolti=[a for a in togli if a in chiavi_scelte], confermati=rimasti)
+    elif modo_esperto:
+        try:
+            esito_esperto = yield from compilatore_esperto.decidi(
+                mappa, fascicolo, documento, cartella_lavoro, memoria_moduli)
+        except (RequestException, compilatore_esperto.RispostaNonValida) as guaio:
+            yield {"passo": "valori", "tentativo": 1,
+                   "testo": "Il servizio per la compilazione accurata non risponde "
+                            "(%s): uso il percorso di sempre." % type(guaio).__name__}
+            modo_esperto = False
+        else:
+            chiavi_scelte = esito_esperto["scelte"]
+            for aid, s in chiavi_scelte.items():
+                decisioni_ai[aid] = {"campo": ", ".join(s.get("fonti", [])),
+                                     "motivo": s.get("motivo") or "Composto dai dati dell'anagrafica"}
+            for s in esito_esperto["scarti"]:
+                if s.get("ancora"):
+                    bocciati.setdefault(s["ancora"], "Proposta scartata dai controlli: %s" % s["motivo"])
+            if not chiavi_scelte:
+                guasti = esito_esperto["guasti"]
+
+    if modo_esperto:
+        pass
+    elif scelte_di_prima is not None:
         yield {"passo": "riuso",
                "testo": "Riuso la decisione gia' presa su questo modulo: non "
                         "richiamo il modello, cosi' togliere un campo toglie "
@@ -307,7 +353,9 @@ def _lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
     for ancora in togli:
         chiavi_scelte.pop(ancora, None)
 
-    valori = {a: profilo[c] for a, c in chiavi_scelte.items() if profilo.get(c)}
+    # Una scelta e' una chiave dell'anagrafica (percorso di sempre, correzione
+    # a mano) oppure un valore composto con le sue fonti (percorso esperto).
+    valori = compilatore_esperto.valori_da_scelte(chiavi_scelte, profilo)
 
     yield {"passo": "scrittura", "testo": "Scrivo nel documento."}
     uscita = cartella_lavoro / ("bozza_" + documento.stem + ".docx")
@@ -335,6 +383,9 @@ def _lavora(radice: Path, documento, fascicolo: dict, cartella_lavoro: Path,
                                               verdetto["contraddizioni"] or
                                               verdetto["mancate"]) else "compilato")
     verdetto["senza_dato"] = sorted(set(senza_dato))
+    if esito_esperto is not None:
+        verdetto["esperto"] = dict(costo=esito_esperto["costo"], giri=esito_esperto["giri"],
+                                   scarti=esito_esperto["scarti"], impronta=esito_esperto["impronta"])
     verdetto["spenti"] = len(spente)
     verdetto["valori"] = valori
     # La decisione esce col verdetto: chi vorra' togliere un campo la rimanda

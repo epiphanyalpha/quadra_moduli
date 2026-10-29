@@ -925,6 +925,11 @@ with pagina_word:
                 st.caption("%s — %d campi — «%s»"
                            % (a["motivo"], len(a["ancore"]), a["riga"]))
 
+        if vw.get("esperto"):
+            st.caption("Compilazione accurata: %d giri di rilettura del modulo compilato, "
+                       "%d proposte scartate dai controlli, costo circa $%.3f."
+                       % (vw["esperto"]["giri"], len(vw["esperto"]["scarti"]),
+                          vw["esperto"]["costo"]))
         messaggio_w = lavorazione_word.racconta(vw)
         if vw.get("esito") == "non_compilato":
             st.error(messaggio_w)
