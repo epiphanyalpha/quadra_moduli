@@ -58,3 +58,29 @@ Render e' gestito dal `render.yaml`: le due variabili nuove si applicano da
 sole, la chiave `QUADRA_WORD_CHIAVE` e' gia' impostata. Per tornare indietro
 basta mettere `QUADRA_WORD_MODO=classico` su Render. In produzione i dati veri
 di Bianca andrebbero ad Anthropic tramite OpenRouter.
+
+## PDF: provato, nessun guadagno misurato, lasciato spento
+
+Aggiunti (spenti per difetto): `QUADRA_PDF_MODELLO` per far decidere un altro
+modello sui PDF, e `QUADRA_PDF_REVISIONE=1` per un giro di revisione guardando
+le pagine GIA' COMPILATE (max 6 pagine), con le correzioni che ripassano dagli
+stessi controlli. Misurato su 5 PDF (istanza e dichiarazioni di gara,
+cessazione, istanza Provincia di Savona, sospensione), anagrafica finta:
+
+| PDF | Sonnet + revisione | Gemini (attuale) |
+|---|---:|---:|
+| istanza | 44 | 44 |
+| dichiarazioni | 60 | 61 |
+| cessazione | 16 | 20 |
+| Provincia SV | 15 | 15 |
+| sospensione | 15 | 15 |
+
+La revisione ha confermato tutte le decisioni su 16 pagine. Le poche
+differenze vanno nei due sensi (Gemini meglio sulla cessazione: telefono,
+email, CCIAA "Imperia"; Sonnet evita una data in una riga di casella).
+Conclusione: sui PDF il giudizio del modello non e' il collo di bottiglia; lo
+sono, secondo letteratura e note di Codex, la mappa dei campi (campi mancanti),
+la geometria delle righe fitte e le caselle. Prossimo passo: i PDF che Bianca
+ha dovuto correggere, e la prova di un rilevatore di campi dedicato
+(CommonForms/FFDNet) se entra nella memoria del piano Render.
+Costo della prova PDF: circa $2.

@@ -1,6 +1,8 @@
 """PDF compilation as validated data bindings, independent of generated code."""
+import contextvars
 import copy
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -213,8 +215,87 @@ def _ripara_scritture(pdf, mappa, piano, evento, fascicolo, catalogo, images, ca
     return esegui(pdf, mappa, plan, fascicolo, nuova_cartella(cartella_lavoro), origine='riparazione_scrittura')
 
 
+PAGINE_REVISIONE = 6
+
+
+def _decisione_uguale(nuova, vecchia):
+    chiave = lambda d: (d.get('stato'), d.get('campo', ''), json.dumps(d.get('parti'), sort_keys=True),
+                        d.get('separatore', ' '), json.dumps(d.get('confronto'), sort_keys=True))
+    return chiave(nuova) == chiave(vecchia)
+
+
+def _revisione_visiva(pdf, mappa, evento, fascicolo, catalogo, cartella_lavoro):
+    """Un giro di revisione guardando la pagina COMPILATA, non l'originale.
+
+    La rilettura di prima giudica le associazioni sul modulo vuoto. Qui il
+    modello vede il PDF finito con i valori dentro: e' li' che si vedono un dato
+    nella riga sbagliata, una parola stampata ripetuta, un posto lasciato vuoto
+    che le fonti potevano riempire. La letteratura sull'autocorrezione (CRITIC e
+    seguenti) dice che correggere funziona con un riscontro esterno e pochi giri:
+    il riscontro e' la pagina resa, il giro e' uno, e ogni correzione ripassa
+    dagli stessi controlli di fonte, formato e verifica materiale.
+    Non tocca le decisioni dell'utente ne' le scelte da confermare.
+    """
+    verdetto = evento['verdetto']
+    piano = verdetto['piano']
+    decisioni = piano['decisioni']
+    scritte = {r['ancora']: r.get('valore') for r in verdetto['verificate']}
+    by_id = {a['id']: a for a in mappa['ancore']}
+    modificabili = lambda a: (decisioni.get(a, {}).get('origine') != 'utente'
+                              and decisioni.get(a, {}).get('stato') != 'da_confermare'
+                              and not revisione_pdf.selezione(by_id[a]))
+    pagine = [p for p in mappa['rese']
+              if any(modificabili(a) for a in p['indirizzi'].values())][:PAGINE_REVISIONE]
+    if not pagine:
+        return evento
+    immagini = agente.immagini_per_pagina(evento['bozza'], [p['pagina'] for p in pagine])
+    rapporto = dict(pagine=[], cambiate={})
+    nuove = {}
+    for page in pagine:
+        indirizzi = {n: a for n, a in page['indirizzi'].items() if modificabili(a)}
+        campi = [dict(posto=n, **{k: by_id[a].get(k) for k in ('etichetta', 'tipo', 'rect', 'contesto', 'parametri')})
+                 for n, a in indirizzi.items()]
+        attuali = [dict(posto=n, decisione={k: decisioni.get(a, {}).get(k) for k in
+                                            ('stato', 'campo', 'parti', 'separatore', 'soggetto', 'motivo')},
+                        valore_scritto=scritte.get(a, '')) for n, a in indirizzi.items()]
+        diagnostica = dict(pagina=page['pagina'])
+        rapporto['pagine'].append(diagnostica)
+        try:
+            proposte = agente.decidi_campi(page['testo'], indirizzi, campi, catalogo,
+                                           immagini.get(page['pagina']), diagnostica=diagnostica,
+                                           _ripara=False, _errori=attuali, revisione=True)
+        except (agente.RispostaModelloInvalida, RequestException) as exc:
+            diagnostica['errore'] = type(exc).__name__
+            continue
+        for aid, d in proposte.items():
+            vecchia = decisioni.get(aid, {})
+            if aid not in indirizzi.values() or _decisione_uguale(d, vecchia):
+                continue
+            if d.get('motivo') == 'Il modello non ha restituito una decisione':
+                continue
+            d = dict(d, origine='revisione_visiva')
+            nuove[aid] = d
+            rapporto['cambiate'][aid] = dict(prima=vecchia, dopo=d)
+    if not nuove:
+        piano.setdefault('diagnostica', {})['revisione_visiva'] = rapporto
+        return evento
+    nuovo_piano = copy.deepcopy(piano)
+    nuovo_piano['decisioni'].update(nuove)
+    nuovo_piano.setdefault('diagnostica', {})['revisione_visiva'] = rapporto
+    return esegui(pdf, mappa, nuovo_piano, fascicolo, nuova_cartella(cartella_lavoro),
+                  origine='revisione_visiva')
+
+
 def lavora(radice, pdf, fascicolo, cartella_lavoro, riusa=True,
            pertinenza_confermata=False, piano_di_prima=None, togli=(), contesto=None):
+    """Il modello dei PDF (QUADRA_PDF_MODELLO) vale per tutto il lavoro, se c'e'."""
+    with agente.usando(agente.config_pdf()):
+        yield from _lavora(radice, pdf, fascicolo, cartella_lavoro, riusa,
+                           pertinenza_confermata, piano_di_prima, togli, contesto)
+
+
+def _lavora(radice, pdf, fascicolo, cartella_lavoro, riusa=True,
+            pertinenza_confermata=False, piano_di_prima=None, togli=(), contesto=None):
     pdf = Path(pdf)
     if firmato(pdf):
         yield dict(passo='rifiuto', testo='Il PDF e gia firmato: usa il modulo originale non firmato.')
@@ -306,7 +387,8 @@ def lavora(radice, pdf, fascicolo, cartella_lavoro, riusa=True,
             finally:
                 salva_json(work/f'lettura_pagina_{page["pagina"]}_tentativo_{attempt+1}.json', diagnostica)
     with ThreadPoolExecutor(max_workers=3) as pool:
-        jobs = [(p, pool.submit(decide, p)) for p in m['rese']]
+        # Il modello in uso deve seguire il lavoro nei thread: un contesto per pagina.
+        jobs = [(p, pool.submit(contextvars.copy_context().run, decide, p)) for p in m['rese']]
         for page, job in jobs:
             try:
                 decisions.update(job.result())
@@ -358,6 +440,11 @@ def lavora(radice, pdf, fascicolo, cartella_lavoro, riusa=True,
     if event['verdetto']['scritture_escluse']:
         yield dict(passo='correzione', testo='Correggo una volta i soli campi con scrittura fallita, conservando quelli riusciti.')
         event = _ripara_scritture(pdf, m, piano, event, fascicolo, catalogo, images, cartella_lavoro)
+        piano = event['verdetto']['piano']
+        decisions = piano['decisioni']
+    if os.environ.get('QUADRA_PDF_REVISIONE', '').strip().lower() in ('1', 'si', 'sì', 'true'):
+        yield dict(passo='correzione', testo='Riguardo le pagine compilate e correggo quello che non va.')
+        event = _revisione_visiva(pdf, m, event, fascicolo, catalogo, cartella_lavoro)
         piano = event['verdetto']['piano']
         decisions = piano['decisioni']
     # Cache only a completely processed decision/review, never a failed attempt.

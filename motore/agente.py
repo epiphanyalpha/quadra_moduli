@@ -579,8 +579,36 @@ def rileggi_pagina(testo_compilato: str, indirizzi: dict, immagine=None) -> dict
     return bocciati
 
 
+def config_pdf():
+    """Il modello che decide sui PDF, se configurato a parte; None = quello di sempre.
+
+    Per i PDF il giudizio e' la parte difficile: si puo' affidarlo a un modello
+    piu' forte (QUADRA_PDF_MODELLO) lasciando tutto il resto com'e'.
+    """
+    modello = os.environ.get("QUADRA_PDF_MODELLO", "").strip()
+    if not modello:
+        return None
+    cw = config_word()
+    base, chiave = (cw[0], cw[1]) if cw else (BASE, CHIAVE)
+    if not (base and chiave):
+        return None
+    return (base, chiave, modello, int(os.environ.get("QUADRA_PDF_TETTO_GETTONI", "32768")))
+
+
+REVISIONE_PAGINA_COMPILATA = '''
+REVISIONE DELLA PAGINA GIA' COMPILATA. L'immagine mostra la pagina con i valori
+GIA' SCRITTI. Ogni posto elencato in errori_contratto_da_correggere porta la
+decisione attuale e il valore scritto. Per ciascuno: ripeti la decisione attuale
+se e' giusta, oppure correggila se, guardando la pagina compilata, il valore e'
+nel posto sbagliato, riguarda un altro soggetto, ripete parole stampate accanto,
+e' illeggibile o esce dal riquadro, o se un posto rimasto vuoto chiede un dato
+che le fonti contengono. Correggi solo errori certi: nel dubbio lascia la
+decisione com'e'. Stesso formato di risposta, una voce per ogni posto elencato.
+'''
+
+
 def decidi_campi(testo, indirizzi, campi, chiavi, immagine=None, diagnostica=None,
-                 _ripara=True, _errori=None):
+                 _ripara=True, _errori=None, revisione=False):
     """A complete, declarative inventory: the model never supplies Python."""
     istruzioni = '''Leggi un modulo e associa i dati documentati del fascicolo.
 Per OGNI posto restituisci una voce JSON con posto, campo, stato, soggetto, motivo.
@@ -629,7 +657,10 @@ Una data stampata come __/__/____ è un solo posto per una data intera.
 '''
     payload = dict(chiavi=list(chiavi), fonti=chiavi if isinstance(chiavi, dict) else {},
                    campi=campi, pagina=testo)
-    if _errori:
+    if _errori and revisione:
+        payload['errori_contratto_da_correggere'] = _errori
+        istruzioni += REVISIONE_PAGINA_COMPILATA
+    elif _errori:
         payload['errori_contratto_da_correggere'] = _errori
         istruzioni += '''\nCorreggi soltanto i posti elencati. Ricevi le decisioni precedenti e gli errori.
 Se una scrittura non entra, verifica che il dato scelto sia proprio quello chiesto:
