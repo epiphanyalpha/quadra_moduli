@@ -84,7 +84,7 @@ services:
       # adesso: una prova senza scadenza diventa un servizio acceso per
       # sempre che nessuno guarda piu'.
       - key: APP_SCADENZA
-        sync: false
+        value: "NESSUNA"     # prova finita il 31/10/2026, Bianca e' cliente: niente scadenza
       # Dove scrivere. Adesso e' una cartella dentro il contenitore, che
       # sparisce a ogni riavvio; il giorno che si aggiunge il disco basta
       # montarlo qui e non cambia nient'altro.
