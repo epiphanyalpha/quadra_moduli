@@ -4,7 +4,7 @@
 Il percorso di prima chiedeva al modello di abbinare ogni posto a un NOME di
 voce dell'anagrafica, senza fargli vedere i valori, e poteva scrivere solo un
 valore cosi' com'era. Una persona invece guarda il modulo, guarda i dati e
-scrive la frase che serve: "Imperia (IM)", "nata a Imperia il 06/03/1971,
+scrive la frase che serve: "Imperia (IM)", "nata a Imperia il 14/05/1972,
 c.f. ...". Qui si fa lo stesso, con tre regole prese dalla letteratura sulla
 compilazione automatica dei moduli (FormGym 2025, FormFactory 2025, CRITIC):
 
@@ -214,7 +214,7 @@ il testo esatto da inserire in quel posto.
 
 REGOLE
 1. Usa solo dati dell'anagrafica. Puoi comporre e formattare come farebbe una
-   persona ("Imperia (IM)", "nata a Imperia il 06/03/1971, c.f. ..."), ma ogni
+   persona ("Imperia (IM)", "nata a Imperia il 14/05/1972, c.f. ..."), ma ogni
    parola deve venire dall'anagrafica. In "fonti" metti le chiavi usate.
 2. Il valore completa la frase stampata: non ripetere parole gia' stampate
    subito prima o dopo il posto. Se il modulo stampa "Via ____ n. ____",

@@ -8,11 +8,36 @@ e la risposta resta buona anche per il prossimo modulo che chiede la stessa cosa
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+
+ANAGRAFICA_SERVER = "/etc/secrets/anagrafica.json"
 
 
 def elenco(radice: Path):
     return sorted((radice / "fascicoli").glob("*.json"))
+
+
+def semina(radice: Path):
+    """Mette al suo posto l'anagrafica riservata del server, se c'e' e manca.
+
+    Sul piano gratuito la cartella dei dati sparisce a ogni riavvio. Il file
+    sta nei Secret Files di Render (QUADRA_ANAGRAFICA): il repository e'
+    pubblico, quindi nel codice e nell'immagine non deve mai entrare. Non
+    sovrascrive: le correzioni fatte nell'app valgono fino al riavvio.
+    """
+    sorgente = Path(os.getenv("QUADRA_ANAGRAFICA") or ANAGRAFICA_SERVER)
+    destinazione = Path(radice) / "fascicoli" / sorgente.name
+    if destinazione.exists() or not sorgente.is_file():
+        return None
+    try:
+        nuovo, _ = importa(json.loads(sorgente.read_text(encoding="utf-8")))
+    except (ValueError, OSError) as guaio:
+        print("Anagrafica del server illeggibile: %s" % type(guaio).__name__)
+        return None
+    destinazione.parent.mkdir(parents=True, exist_ok=True)
+    salva(destinazione, nuovo)
+    return destinazione
 
 
 def carica(percorso) -> dict:

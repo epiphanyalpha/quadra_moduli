@@ -88,6 +88,8 @@ services:
       # Dove scrivere. Adesso e' una cartella dentro il contenitore, che
       # sparisce a ogni riavvio; il giorno che si aggiunge il disco basta
       # montarlo qui e non cambia nient'altro.
+      # L'anagrafica di Bianca: Secret File "anagrafica.json" nel pannello di
+      # Render, mai nel repository (e' pubblico). L'app la rimette a ogni avvio.
       - key: QUADRA_DATI
         value: /app/dati
       # Senza disco quello che si scrive non sopravvive al

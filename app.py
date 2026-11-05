@@ -343,6 +343,7 @@ _stato("w_modulo", None)
 # fascicolo dell'impresa non viaggia dentro l'immagine - sono dati di
 # persone vere, e un'immagine finisce in posti che non si controllano -
 # quindi il primo giorno si carica, e questa e' la pagina che lo chiede.
+fascicoli.semina(DATI)
 if not fascicoli.elenco(DATI):
     st.markdown(_marchio(), unsafe_allow_html=True)
     st.title("Manca l'anagrafica dell'impresa")
